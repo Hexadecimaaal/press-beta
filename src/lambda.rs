@@ -1,62 +1,104 @@
-use core::panic;
 use lazy_static::lazy_static;
 use std::{fmt::Display, mem};
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-enum Expr {
+pub enum Expr {
   Var(u8),
   Lam(Box<Expr>),
   App(Box<Expr>, Box<Expr>),
-  #[default] Hole
+  /// input logic: use this as default state and overwrite whenever possible
+  #[default]
+  Hole,
 }
 
+use Expr::*;
+
 lazy_static! {
-  static ref ID: Expr = Expr::Lam(box Expr::Var(0));
-  static ref ZERO: Expr = Expr::Lam(box Expr::Lam(box Expr::Var(0)));
-  static ref ONE: Expr = Expr::Lam(box Expr::Lam(box Expr::App(
-    box Expr::Var(1),
-    box Expr::Var(0),
-  )));
-  static ref PLUS: Expr = Expr::Lam(box Expr::Lam(box Expr::Lam(box Expr::Lam(box Expr::App(
-    box Expr::App(box Expr::Var(3), box Expr::Var(1)),
-    box Expr::App(
-      box Expr::App(box Expr::Var(2), box Expr::Var(1)),
-      box Expr::Var(0),
-    ),
+  pub static ref ID: Expr = Lam(box Var(0));
+  static ref ZERO: Expr = Lam(box Lam(box Var(0)));
+  static ref CONST: Expr = Lam(box Lam(box (Var(1))));
+  static ref ONE: Expr = Lam(box Lam(box App(box Var(1), box Var(0))));
+  static ref FORK: Expr = Lam(box Lam(box Lam(box App(
+    box App(box Var(2), box Var(0)),
+    box App(box Var(1), box Var(0)),
+  ))));
+  pub static ref SUCC: Expr = Lam(box Lam(box Lam(box App(
+    box Var(1),
+    box App(box App(box Var(2), box Var(1)), box Var(0)),
+  ))));
+  pub static ref PLUS: Expr = Lam(box Lam(box Lam(box Lam(box App(
+    box App(box Var(3), box Var(1)),
+    box App(box App(box Var(2), box Var(1)), box Var(0)),
+  )))));
+  pub static ref TIMES: Expr = Lam(box Lam(box Lam(box Lam(box App(
+    box App(box Var(3), box App(box Var(2), box Var(1))),
+    box Var(0),
+  )))));
+  pub static ref POWER: Expr = Lam(box Lam(box Lam(box Lam(box App(
+    box App(box App(box Var(2), box Var(3)), box Var(1)),
+    box Var(0),
   )))));
 }
 
 impl Expr {
-  fn replace(&mut self, v : u8, to : &Expr) {
+  pub fn replace(&mut self, v : u8, to : &Expr) {
     match self {
-      Expr::Var(u) => {
+      Var(u) => {
         if *u == v {
           *self = to.clone()
         }
       }
-      Expr::Lam(e) => e.replace(v + 1, to),
-      Expr::App(l, r) => {
+      Lam(e) => e.replace(v.saturating_add(1), to),
+      App(l, r) => {
         l.replace(v, to);
         r.replace(v, to)
       }
-      Expr::Hole => {}
+      Hole => {}
     }
   }
-  fn head(&mut self) -> Option<&mut Expr> {
-    if matches!(self, Expr::App(box Expr::Lam(_), _)) {
+  pub fn map_parent<F>(&mut self, v : u8, f : &mut F) -> bool
+  where
+    F : FnMut(&mut Expr),
+  {
+    use Expr::*;
+    match self {
+      Lam(box Var(u)) if v == *u => { f(self); true },
+      Lam(box e) => e.map_parent(v, f),
+      App(box Var(u), _) | App(_, box Var(u)) if v == *u => { f(self); true },
+      App(box l, box r) => {
+        r.map_parent(v, f) ||
+        l.map_parent(v, f)
+      }
+      _ => false
+    }
+  }
+  pub fn head(&mut self) -> Option<&mut Expr> {
+    if matches!(self, App(box Lam(_), _)) {
       Some(self)
-    } else if let Expr::App(l, _) = self {
+    } else if let App(l, _) = self {
       l.head()
     } else {
       None
     }
   }
-  pub fn beta(&mut self) {
-    if let Expr::App(box Expr::Lam(e), r) = self {
+  fn find_redux(&mut self) -> Option<&mut Expr> {
+    if matches!(self, App(box Lam(_), _)) {
+      Some(self)
+    } else {
+      match self {
+        Lam(box e) => e.find_redux(),
+        App(box l, box r) => l.find_redux().or_else(|| r.find_redux()),
+        _ => None,
+      }
+    }
+  }
+  pub fn beta(&mut self) -> bool {
+    if let App(box Lam(e), r) = self {
       e.replace(0, &r);
       *self = mem::take(e);
+      true
     } else {
-      panic!("{:?} does not beta", self)
+      false
     }
   }
   pub fn hnf(&mut self) {
@@ -65,15 +107,21 @@ impl Expr {
     }
   }
 
-  fn to_nat(&self) -> Option<u8> {
+  pub fn nf(&mut self) {
+    while let Some(redox) = self.find_redux() {
+      redox.beta();
+    }
+  }
+
+  pub fn to_nat(&self) -> Option<u8> {
     let mut ret = 0u8;
-    if let Expr::Lam(box Expr::Lam(box e)) = self {
+    if let Lam(box Lam(box e)) = self {
       let mut e = e;
-      while let Expr::App(box Expr::Var(1), eprime) = e {
+      while let App(box Var(1), eprime) = e {
         ret += 1;
         e = eprime;
       }
-      if Expr::Var(0) == *e {
+      if Var(0) == *e {
         Some(ret)
       } else {
         None
@@ -83,12 +131,12 @@ impl Expr {
     }
   }
 
-  fn from_nat(n: u8) -> Expr {
-    let mut ret = Expr::Var(0);
+  pub fn from_nat(n : u8) -> Expr {
+    let mut ret = Var(0);
     for _ in 0..n {
-      ret = Expr::App(box Expr::Var(1), box ret);
+      ret = App(box Var(1), box ret);
     }
-    Expr::Lam(box Expr::Lam(box ret))
+    Lam(box Lam(box ret))
   }
 }
 
@@ -100,7 +148,7 @@ fn test_to_nat() {
 
 #[test]
 fn test_beta() {
-  let mut idid = Expr::App(box ID.clone(), box ID.clone());
+  let mut idid = App(box ID.clone(), box ID.clone());
   idid.beta();
   assert_eq!(idid, *ID);
 }
@@ -109,30 +157,86 @@ const VAR_NUMERALS : [char; 11] = ['🄌', '➊', '➋', '➌', '➍', '➎', '�
 
 impl Display for Expr {
   fn fmt(&self, f : &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    if *ID == *self {
-      write!(f, "[id]")
+    if let Some(n) = self.to_nat() {
+      write!(f, "{}", n)
     } else {
       match self {
-        Expr::Var(u) => {
-          if *u < 11 {
+        _ if *ID == *self => write!(f, "I"),
+        _ if *CONST == *self => write!(f, "K"),
+        _ if *FORK == *self => write!(f, "S"),
+        _ if *SUCC == *self => write!(f, "SUCC"),
+        _ if *PLUS == *self => write!(f, "+"),
+        _ if *TIMES == *self => write!(f, "*"),
+        _ if *POWER == *self => write!(f, "^"),
+        Var(u) => {
+          if *u <= 10 {
             write!(f, "{}", VAR_NUMERALS[*u as usize])
           } else {
             write!(f, "[{}]", *u)
           }
         }
-        Expr::Lam(e) => write!(f, "𝛌{}", e),
-        Expr::App(l, r) => write!(f, "({} {})", l, r),
-        Expr::Hole => write!(f, "▪")
+        Lam(e) => {
+          if f.alternate() {
+            write!(f, "(𝛌{:+})", e)
+          } else {
+            write!(f, "𝛌{:+}", e)
+          }
+        }
+        App(box l, box r) => {
+          if f.sign_plus() {
+            write!(f, " ")?
+          }
+          if f.alternate() {
+            write!(f, "(")?
+          }
+          match (l, r) {
+            (Lam(_), _) => write!(f, "{:#} {:#}", l, r),
+            (..) => write!(f, "{} {:#}", l, r),
+          }?;
+          if f.alternate() {
+            write!(f, ")")
+          } else {
+            Ok(())
+          }
+        }
+        Hole => write!(f, "▪"),
       }
     }
   }
 }
 
 #[test]
-fn test_formatting() {
-  assert_eq!(ID.to_string(), "[id]");
-  assert_eq!(
-    Expr::App(box ID.clone(), box ID.clone()).to_string(),
-    "([id] [id])"
-  );
+fn test_with_formatting() {
+  assert_eq!(ID.to_string(), "I");
+  assert_eq!(App(box ID.clone(), box ID.clone()).to_string(), "I I");
+  assert_eq!(ZERO.to_string(), "0");
+  assert_eq!(ONE.to_string(), "1");
+  assert_eq!(Expr::from_nat(10).to_string(), "10");
+  assert_eq!(Lam(box Expr::from_nat(10)).to_string(), "𝛌10");
+
+  assert_eq!(PLUS.to_string(), "+");
+  let mut p1 = App(box PLUS.clone(), box ONE.clone());
+  assert_eq!(p1.to_string(), "+ 1");
+  p1.hnf();
+  assert_eq!(p1.to_string(), "𝛌𝛌𝛌 1 ➊ (➋ ➊ 🄌)");
+  p1.nf();
+  assert_eq!(p1.to_string(), "SUCC");
+  let mut p11 = App(box p1, box ONE.clone());
+  p11.nf();
+  assert_eq!(p11.to_string(), "2");
+
+  let mut pow24 = App(box App(box POWER.clone(), box p11), box Expr::from_nat(4));
+  assert_eq!(pow24.to_string(), "^ 2 4");
+  pow24.head().unwrap().beta();
+  assert_eq!(pow24.to_string(), "(𝛌𝛌𝛌 ➋ 2 ➊ 🄌) 4");
+  pow24.beta();
+  assert_eq!(pow24.to_string(), "𝛌𝛌 4 2 ➊ 🄌");
+  pow24.find_redux().unwrap().beta();
+  assert_eq!(pow24.to_string(), "𝛌𝛌 (𝛌 2 (2 (2 (2 🄌)))) ➊ 🄌");
+  pow24.find_redux().unwrap().beta();
+  assert_eq!(pow24.to_string(), "𝛌𝛌 2 (2 (2 (2 ➊))) 🄌");
+  pow24.find_redux().unwrap().beta();
+  assert_eq!(pow24.to_string(), "𝛌𝛌 (𝛌 2 (2 (2 ➊)) (2 (2 (2 ➊)) 🄌)) 🄌");
+  pow24.nf();
+  assert_eq!(pow24.to_string(), "16");
 }
