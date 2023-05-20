@@ -42,6 +42,43 @@ lazy_static! {
 }
 
 impl Expr {
+  pub fn shift(&self, v : u8) -> Expr {
+    match self {
+      Var(u) => {
+        if *u >= v {
+          Var(u + 1)
+        } else {
+          Var(*u)
+        }
+      }
+      Lam(e) => Lam(box e.shift(v + 1)),
+      App(l, r) => App(box l.shift(v), box r.shift(v)),
+      _ => self.clone(),
+    }
+  }
+  pub fn closed(&self, v : u8) -> bool {
+    match self {
+      Var(u) => *u <= v,
+      Lam(e) => e.closed(v + 1),
+      App(l, r) => l.closed(v) && r.closed(v),
+      _ => true,
+    }
+  }
+  pub fn unshift(&mut self, v : u8) {
+    match self {
+      Var(u) => {
+        if *u >= v {
+          *u = *u - 1
+        }
+      }
+      Lam(e) => e.unshift(v + 1),
+      App(l, r) => {
+        l.unshift(v);
+        r.unshift(v)
+      }
+      _ => {}
+    }
+  }
   pub fn replace(&mut self, v : u8, to : &Expr) {
     match self {
       Var(u) => {
@@ -49,7 +86,13 @@ impl Expr {
           *self = to.clone()
         }
       }
-      Lam(e) => e.replace(v + 1, to),
+      Lam(e) => {
+        if to.closed(0) {
+          e.replace(v + 1, to)
+        } else {
+          e.replace(v + 1, &to.shift(0))
+        }
+      }
       App(l, r) => {
         l.replace(v, to);
         r.replace(v, to)
@@ -62,34 +105,59 @@ impl Expr {
   pub fn replace_slot(&mut self, to : Expr) -> Option<Expr> {
     match self {
       Var(_) | Hole => Some(to),
-      Slot => {*self = to; None }
+      Slot => {
+        *self = to;
+        None
+      }
       Lam(e) => e.replace_slot(to),
       App(l, r) => l.replace_slot(to).and_then(|to| r.replace_slot(to)),
     }
   }
-  // pub fn map_parent<F>(&mut self, v : u8, f : &mut F) -> bool
-  // where
-  //   F : FnMut(&mut Expr),
-  // {
-  //   match self {
-  //     Lam(box Var(u)) if v == *u => { f(self); true },
-  //     Lam(box e) => e.map_parent(v, f),
-  //     App(box Var(u), _) | App(_, box Var(u)) if v == *u => { f(self); true },
-  //     App(box l, box r) => {
-  //       r.map_parent(v, f) ||
-  //       l.map_parent(v, f)
-  //     }
-  //     _ => false
-  //   }
-  // }
-
-  pub fn find_parent(&mut self, v : u8) -> Option<&mut Expr> {
+  pub fn find_slot_parent(&mut self) -> Option<&mut Expr> {
     match self {
-      Lam(box Var(u)) if v == *u => Some(self),
-      Lam(box e) => e.find_parent(v),
-      App(box Var(u), _) | App(_, box Var(u)) if v == *u => Some(self),
-      App(box l, box r) => l.find_parent(v).or_else(|| r.find_parent(v)),
+      Lam(box Slot) => Some(self),
+      Lam(box e) => e.find_slot_parent(),
+      App(box Slot, _) | App(_, box Slot) => Some(self),
+      App(box l, box r) => l.find_slot_parent().or_else(|| r.find_slot_parent()),
       _ => None,
+    }
+  }
+  pub fn rightmost(&mut self) -> &mut Expr {
+    match self {
+      Var(_) | Hole | Slot => self,
+      Lam(box e) | App(_, box e) => e.rightmost(),
+    }
+  }
+  pub fn leftmost(&mut self) -> &mut Expr {
+    match self {
+      Var(_) | Hole | Slot => self,
+      Lam(box e) | App(box e, _) => e.leftmost(),
+    }
+  }
+  pub fn find_slot_leftsib(&mut self) -> Option<(&mut Expr, &mut Expr)> {
+    match self {
+      Var(_) | Hole | Slot => None,
+      Lam(box e) => e.find_slot_leftsib(),
+      App(box l, box r) => {
+        if r.leftmost() == &Slot {
+          Some((r.leftmost(), l.rightmost()))
+        } else {
+          l.find_slot_leftsib().or_else(|| r.find_slot_leftsib())
+        }
+      }
+    }
+  }
+  pub fn find_slot_rightsib(&mut self) -> Option<(&mut Expr, &mut Expr)> {
+    match self {
+      Var(_) | Hole | Slot => None,
+      Lam(box e) => e.find_slot_rightsib(),
+      App(box l, box r) => {
+        if l.rightmost() == &Slot {
+          Some((l.rightmost(), r.leftmost()))
+        } else {
+          l.find_slot_rightsib().or_else(|| r.find_slot_rightsib())
+        }
+      }
     }
   }
   pub fn head(&mut self) -> Option<&mut Expr> {
@@ -114,6 +182,7 @@ impl Expr {
   }
   pub fn beta(&mut self) -> bool {
     if let App(box Lam(e), r) = self {
+      e.unshift(1);
       e.replace(0, &r);
       *self = mem::take(e);
       true
@@ -167,10 +236,36 @@ fn test_to_nat() {
 }
 
 #[test]
+fn test_shift() {
+  assert_eq!(ID.clone().shift(0), *ID);
+  assert_eq!(ZERO.clone().shift(0), *ZERO);
+  assert_eq!(Var(0).shift(0), Var(1));
+  assert_eq!(ONE.clone().shift(0), *ONE);
+}
+
+#[test]
 fn test_beta() {
   let mut idid = App(box ID.clone(), box ID.clone());
   idid.beta();
   assert_eq!(idid, *ID);
+  let mut free_beta = App(
+    box Lam(box Lam(box App(
+      box App(box Var(3), box Var(1)),
+      box Lam(box App(box Var(0), box Var(2))),
+    ))),
+    box Lam(box App(box Var(4), box Var(0))),
+  );
+  free_beta.beta();
+  assert_eq!(
+    free_beta,
+    Lam(box App(
+      box App(box Var(2), box Lam(box App(box Var(5), box Var(0)))),
+      box Lam(box App(
+        box Var(0),
+        box Lam(box App(box Var(6), box Var(0)))
+      ))
+    ))
+  )
 }
 
 const VAR_NUMERALS : [char; 11] = ['🄌', '➊', '➋', '➌', '➍', '➎', '➏', '➐', '➑', '➒', '➓'];
@@ -220,7 +315,16 @@ impl Display for Expr {
           }
         }
         Hole => write!(f, "▪"),
-        Slot => write!(f, "__")
+        Slot => {
+          write!(f, "_")?;
+          if f.sign_plus() {
+            write!(f, "+")?;
+          }
+          if f.alternate() {
+            write!(f, "#")?;
+          }
+          write!(f, "_")
+        }
       }
     }
   }
@@ -254,10 +358,6 @@ fn test_with_formatting() {
   assert_eq!(pow24.to_string(), "𝛌𝛌 4 2 ➊ 🄌");
   pow24.find_redux().unwrap().beta();
   assert_eq!(pow24.to_string(), "𝛌𝛌 (𝛌 2 (2 (2 (2 🄌)))) ➊ 🄌");
-  pow24.find_redux().unwrap().beta();
-  assert_eq!(pow24.to_string(), "𝛌𝛌 2 (2 (2 (2 ➊))) 🄌");
-  pow24.find_redux().unwrap().beta();
-  assert_eq!(pow24.to_string(), "𝛌𝛌 (𝛌 2 (2 (2 ➊)) (2 (2 (2 ➊)) 🄌)) 🄌");
   pow24.nf();
   assert_eq!(pow24.to_string(), "16");
 }

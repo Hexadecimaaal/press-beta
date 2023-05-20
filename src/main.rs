@@ -57,16 +57,18 @@ fn main() -> Result<(), std::io::Error> {
         Slot => panic!(),
       },
       "up" => {
-        if let App(box Hole, box e) | App(box e, box Hole) = cursor {
-          cursor = e;
-        }
         if leaf_mode {
           leaf_mode = false
-        } else if let Some(p) = expr.find_parent(255) {
-          let mut new = Slot;
-          mem::swap(p, &mut new);
-          new.replace_slot(cursor);
-          cursor = new;
+        } else if let Some(p) = expr.find_slot_parent() {
+          if let App(box Slot, box e) | App(box e, box Slot) = p && cursor == Hole {
+            mem::swap(e, &mut cursor);
+            *p = Slot
+          } else {
+            let mut new = Slot;
+            mem::swap(p, &mut new);
+            new.replace_slot(cursor);
+            cursor = new;
+          }
         } else {
           println!("boop")
         }
@@ -76,9 +78,34 @@ fn main() -> Result<(), std::io::Error> {
         cursor = expr;
         expr = Slot
       }
+      "lm" => {
+        let mut new = Slot;
+        mem::swap(cursor.leftmost(), &mut new);
+        expr.replace_slot(cursor);
+        cursor = new;
+        leaf_mode = true;
+      }
+      "rm" => {
+        let mut new = Slot;
+        mem::swap(cursor.rightmost(), &mut new);
+        expr.replace_slot(cursor);
+        cursor = new;
+        leaf_mode = true;
+      }
       "lt" => {
-        if let Some(p) = expr.find_parent(255) {
+        if leaf_mode {
+          if let Some((slot, sib)) = expr.find_slot_leftsib() {
+            mem::swap(slot, &mut cursor);
+            mem::swap(sib, &mut cursor);
+          } else {
+            leaf_mode = false
+          }
+        } else if let Some(p) = expr.find_slot_parent() {
           match p {
+            App(box e, box Slot) if cursor == Hole => {
+              mem::swap(e, &mut cursor);
+              *p = Slot
+            }
             App(box l, box r) if *r == Slot => {
               mem::swap(r, &mut cursor);
               mem::swap(l, &mut cursor);
@@ -95,8 +122,19 @@ fn main() -> Result<(), std::io::Error> {
         }
       }
       "rt" => {
-        if let Some(p) = expr.find_parent(255) {
+        if leaf_mode {
+          if let Some((slot, sib)) = expr.find_slot_rightsib() {
+            mem::swap(slot, &mut cursor);
+            mem::swap(sib, &mut cursor);
+          } else {
+            leaf_mode = false
+          }
+        } else if let Some(p) = expr.find_slot_parent() {
           match p {
+            App(box Slot, box e) if cursor == Hole => {
+              mem::swap(e, &mut cursor);
+              *p = Slot
+            }
             App(box l, box r) if *l == Slot => {
               mem::swap(l, &mut cursor);
               mem::swap(r, &mut cursor);
@@ -162,9 +200,33 @@ fn main() -> Result<(), std::io::Error> {
       expr.to_string().replace(
         "__",
         (if leaf_mode {
-          format!("「{}」", cursor)
+          format!("\x1b[4m{}\x1b[24m", cursor)
         } else {
-          format!("『{}』", cursor)
+          format!("\x1b[7m{}\x1b[27m", cursor)
+        })
+        .as_str()
+      ).replace(
+        "_#_",
+        (if leaf_mode {
+          format!("\x1b[4m{:#}\x1b[24m", cursor)
+        } else {
+          format!("\x1b[7m{:#}\x1b[27m", cursor)
+        })
+        .as_str()
+      ).replace(
+        "_+_",
+        (if leaf_mode {
+          format!("\x1b[4m{:+}\x1b[24m", cursor)
+        } else {
+          format!("\x1b[7m{:+}\x1b[27m", cursor)
+        })
+        .as_str()
+      ).replace(
+        "_+#_",
+        (if leaf_mode {
+          format!("\x1b[4m{:+#}\x1b[24m", cursor)
+        } else {
+          format!("\x1b[7m{:+#}\x1b[27m", cursor)
         })
         .as_str()
       )
