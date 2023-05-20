@@ -9,6 +9,7 @@ pub enum Expr {
   /// input logic: use this as default state and overwrite whenever possible
   #[default]
   Hole,
+  Slot,
 }
 
 use Expr::*;
@@ -48,28 +49,47 @@ impl Expr {
           *self = to.clone()
         }
       }
-      Lam(e) => e.replace(v.saturating_add(1), to),
+      Lam(e) => e.replace(v + 1, to),
       App(l, r) => {
         l.replace(v, to);
         r.replace(v, to)
       }
-      Hole => {}
+      Hole | Slot => {}
     }
   }
-  pub fn map_parent<F>(&mut self, v : u8, f : &mut F) -> bool
-  where
-    F : FnMut(&mut Expr),
-  {
-    use Expr::*;
+
+  /// returns Some if replace FAILED
+  pub fn replace_slot(&mut self, to : Expr) -> Option<Expr> {
     match self {
-      Lam(box Var(u)) if v == *u => { f(self); true },
-      Lam(box e) => e.map_parent(v, f),
-      App(box Var(u), _) | App(_, box Var(u)) if v == *u => { f(self); true },
-      App(box l, box r) => {
-        r.map_parent(v, f) ||
-        l.map_parent(v, f)
-      }
-      _ => false
+      Var(_) | Hole => Some(to),
+      Slot => {*self = to; None }
+      Lam(e) => e.replace_slot(to),
+      App(l, r) => l.replace_slot(to).and_then(|to| r.replace_slot(to)),
+    }
+  }
+  // pub fn map_parent<F>(&mut self, v : u8, f : &mut F) -> bool
+  // where
+  //   F : FnMut(&mut Expr),
+  // {
+  //   match self {
+  //     Lam(box Var(u)) if v == *u => { f(self); true },
+  //     Lam(box e) => e.map_parent(v, f),
+  //     App(box Var(u), _) | App(_, box Var(u)) if v == *u => { f(self); true },
+  //     App(box l, box r) => {
+  //       r.map_parent(v, f) ||
+  //       l.map_parent(v, f)
+  //     }
+  //     _ => false
+  //   }
+  // }
+
+  pub fn find_parent(&mut self, v : u8) -> Option<&mut Expr> {
+    match self {
+      Lam(box Var(u)) if v == *u => Some(self),
+      Lam(box e) => e.find_parent(v),
+      App(box Var(u), _) | App(_, box Var(u)) if v == *u => Some(self),
+      App(box l, box r) => l.find_parent(v).or_else(|| r.find_parent(v)),
+      _ => None,
     }
   }
   pub fn head(&mut self) -> Option<&mut Expr> {
@@ -81,7 +101,7 @@ impl Expr {
       None
     }
   }
-  fn find_redux(&mut self) -> Option<&mut Expr> {
+  pub fn find_redux(&mut self) -> Option<&mut Expr> {
     if matches!(self, App(box Lam(_), _)) {
       Some(self)
     } else {
@@ -200,6 +220,7 @@ impl Display for Expr {
           }
         }
         Hole => write!(f, "▪"),
+        Slot => write!(f, "__")
       }
     }
   }

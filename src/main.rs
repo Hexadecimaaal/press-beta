@@ -1,67 +1,124 @@
 #![feature(box_syntax, box_patterns)]
 pub mod lambda;
-use crate::lambda::{Expr, PLUS, POWER, SUCC, TIMES};
-use std::io::stdin;
+use crate::lambda::{Expr, PLUS, POWER, TIMES};
+use std::{io::stdin, mem};
 use Expr::*;
 
 fn main() -> Result<(), std::io::Error> {
-  let mut expr = Expr::Var(255);
-  let mut cursor = Expr::Hole;
+  let mut expr = Slot;
+  let mut cursor = Hole;
   let mut keys = stdin().lines().map(|l| l.unwrap()).flat_map(|l| {
     l.split_whitespace()
       .map(|w| w.to_owned())
       .collect::<Vec<_>>()
   });
-  println!("{}", expr);
-  println!("[255] = {}", cursor);
+  let mut leaf_mode = true;
   while let Some(cmd) = keys.next() {
     match cmd.as_str() {
-      "bs" => cursor = Expr::Hole,
-      "l" => cursor = Expr::Lam(box cursor),
+      "bs" => cursor = Hole,
+      "l" => {
+        if cursor == Hole {
+          expr.replace_slot(Lam(box Slot));
+        } else {
+          cursor = Lam(box cursor)
+        }
+      }
       "b" => {
         if !cursor.beta() {
           println!("boop(beta)")
         }
       }
+      "redux" => {
+        if let Some(hd) = cursor.find_redux() {
+          let mut new = Slot;
+          mem::swap(hd, &mut new);
+          expr.replace_slot(cursor);
+          cursor = new
+        } else {
+          println!("boop(redux)")
+        }
+      }
       "dn" => match cursor {
         Lam(box e) => {
-          expr.replace(255, &Lam(box Var(255)));
+          expr.replace_slot(Lam(box Slot));
           cursor = e
         }
         App(box l, r) => {
-          expr.replace(255, &App(box Var(255), r));
+          expr.replace_slot(App(box Slot, r));
           cursor = l
         }
-        Hole | Var(_) => println!("boop"),
+        Hole | Var(_) => {
+          if leaf_mode {
+            println!("boop")
+          } else {
+            leaf_mode = true
+          }
+        }
+        Slot => panic!(),
       },
       "up" => {
         if let App(box Hole, box e) | App(box e, box Hole) = cursor {
           cursor = e;
         }
-        if !expr.map_parent(255, &mut |e| {
-          let mut new = Var(255);
-          std::mem::swap(e, &mut new);
-          new.replace(255, &cursor);
+        if leaf_mode {
+          leaf_mode = false
+        } else if let Some(p) = expr.find_parent(255) {
+          let mut new = Slot;
+          mem::swap(p, &mut new);
+          new.replace_slot(cursor);
           cursor = new;
-        }) {
+        } else {
           println!("boop")
         }
       }
       "top" => {
-        expr.replace(255, &cursor);
+        expr.replace_slot(cursor);
         cursor = expr;
-        expr = Var(255)
+        expr = Slot
       }
       "lt" => {
-        if !expr.map_parent(255, &mut |e| match e {
-          App(box l, box r) if *r == Var(255) => {
-            std::mem::swap(r, &mut cursor);
-            std::mem::swap(l, &mut cursor);
+        if let Some(p) = expr.find_parent(255) {
+          match p {
+            App(box l, box r) if *r == Slot => {
+              mem::swap(r, &mut cursor);
+              mem::swap(l, &mut cursor);
+            }
+            _ => {
+              let mut new = Slot;
+              mem::swap(p, &mut new);
+              new.replace_slot(cursor);
+              cursor = new;
+            }
           }
-          _ => todo!(),
-        }) {
+        } else {
           println!("boop")
         }
+      }
+      "rt" => {
+        if let Some(p) = expr.find_parent(255) {
+          match p {
+            App(box l, box r) if *l == Slot => {
+              mem::swap(l, &mut cursor);
+              mem::swap(r, &mut cursor);
+            }
+            _ => {
+              let mut new = Slot;
+              mem::swap(p, &mut new);
+              new.replace_slot(cursor);
+              cursor = new;
+            }
+          }
+        } else {
+          println!("boop")
+        }
+      }
+      "$" => {
+        expr.replace_slot(App(box cursor, box Slot));
+        cursor = Hole;
+      }
+      "@" => {
+        expr.replace_slot(App(box Slot, box cursor));
+        cursor = Hole;
       }
       "+" => match cursor {
         Hole => cursor = PLUS.clone(),
@@ -80,15 +137,38 @@ fn main() -> Result<(), std::io::Error> {
           if cursor == Hole {
             cursor = Expr::from_nat(u)
           } else {
-            println!("boop")
+            cursor = App(box cursor, box Expr::from_nat(u))
+          }
+        } else if let Some(u) = s
+          .strip_prefix("[")
+          .and_then(|s| s.strip_suffix("]"))
+          .and_then(|s| s.parse::<u8>().ok())
+        {
+          if cursor == Hole {
+            cursor = Var(u)
+          } else {
+            cursor = App(box cursor, box Var(u))
           }
         } else {
           println!("unrec'd cmd: {}", s)
         }
       }
     }
-    println!("{}", expr);
-    println!("[255] = {}", cursor);
+    if !matches!(cursor, Var(_) | Hole) {
+      leaf_mode = false;
+    }
+    println!(
+      "{}",
+      expr.to_string().replace(
+        "__",
+        (if leaf_mode {
+          format!("「{}」", cursor)
+        } else {
+          format!("『{}』", cursor)
+        })
+        .as_str()
+      )
+    );
   }
   Ok(())
 }

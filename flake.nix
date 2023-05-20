@@ -24,6 +24,9 @@
             (rust-bin.nightly.latest.default.override {
               extensions = [ "rust-src" ];
             })
+            ncurses
+            lldb
+            python3
           ];
         };
       }
