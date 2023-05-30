@@ -1,31 +1,34 @@
 #![feature(box_syntax, box_patterns)]
 pub mod lambda;
-use crate::lambda::{Expr, PLUS, POWER, TIMES};
+use crate::lambda::{DisplayStruct, Expr, PLUS, POWER, TIMES};
 use std::{io::stdin, mem};
 use Expr::*;
 
-fn main() -> Result<(), std::io::Error> {
+fn main() {
   let mut expr = Slot;
   let mut cursor = Hole;
-  let mut keys = stdin().lines().map(|l| l.unwrap()).flat_map(|l| {
-    l.split_whitespace()
-      .map(|w| w.to_owned())
-      .collect::<Vec<_>>()
-  });
+  let keys = stdin()
+    .lines()
+    .map(std::result::Result::unwrap)
+    .flat_map(|l| {
+      l.split_whitespace()
+        .map(std::borrow::ToOwned::to_owned)
+        .collect::<Vec<_>>()
+    });
   let mut leaf_mode = true;
-  while let Some(cmd) = keys.next() {
+  for cmd in keys {
     match cmd.as_str() {
       "bs" => cursor = Hole,
       "l" => {
         if cursor == Hole {
           expr.replace_slot(Lam(box Slot));
         } else {
-          cursor = Lam(box cursor)
+          cursor = Lam(box cursor);
         }
       }
       "b" => {
         if !cursor.beta() {
-          println!("boop(beta)")
+          println!("boop(beta)");
         }
       }
       "redux" => {
@@ -33,36 +36,36 @@ fn main() -> Result<(), std::io::Error> {
           let mut new = Slot;
           mem::swap(hd, &mut new);
           expr.replace_slot(cursor);
-          cursor = new
+          cursor = new;
         } else {
-          println!("boop(redux)")
+          println!("boop(redux)");
         }
       }
       "dn" => match cursor {
         Lam(box e) => {
           expr.replace_slot(Lam(box Slot));
-          cursor = e
+          cursor = e;
         }
         App(box l, r) => {
           expr.replace_slot(App(box Slot, r));
-          cursor = l
+          cursor = l;
         }
         Hole | Var(_) => {
           if leaf_mode {
-            println!("boop")
+            println!("boop");
           } else {
-            leaf_mode = true
+            leaf_mode = true;
           }
         }
         Slot => panic!(),
       },
       "up" => {
         if leaf_mode {
-          leaf_mode = false
+          leaf_mode = false;
         } else if let Some(p) = expr.find_slot_parent() {
           if let App(box Slot, box e) | App(box e, box Slot) = p && cursor == Hole {
             mem::swap(e, &mut cursor);
-            *p = Slot
+            *p = Slot;
           } else {
             let mut new = Slot;
             mem::swap(p, &mut new);
@@ -70,13 +73,13 @@ fn main() -> Result<(), std::io::Error> {
             cursor = new;
           }
         } else {
-          println!("boop")
+          println!("boop");
         }
       }
       "top" => {
         expr.replace_slot(cursor);
         cursor = expr;
-        expr = Slot
+        expr = Slot;
       }
       "lm" => {
         let mut new = Slot;
@@ -98,13 +101,13 @@ fn main() -> Result<(), std::io::Error> {
             mem::swap(slot, &mut cursor);
             mem::swap(sib, &mut cursor);
           } else {
-            leaf_mode = false
+            leaf_mode = false;
           }
         } else if let Some(p) = expr.find_slot_parent() {
           match p {
             App(box e, box Slot) if cursor == Hole => {
               mem::swap(e, &mut cursor);
-              *p = Slot
+              *p = Slot;
             }
             App(box l, box r) if *r == Slot => {
               mem::swap(r, &mut cursor);
@@ -118,7 +121,7 @@ fn main() -> Result<(), std::io::Error> {
             }
           }
         } else {
-          println!("boop")
+          println!("boop");
         }
       }
       "rt" => {
@@ -127,13 +130,13 @@ fn main() -> Result<(), std::io::Error> {
             mem::swap(slot, &mut cursor);
             mem::swap(sib, &mut cursor);
           } else {
-            leaf_mode = false
+            leaf_mode = false;
           }
         } else if let Some(p) = expr.find_slot_parent() {
           match p {
             App(box Slot, box e) if cursor == Hole => {
               mem::swap(e, &mut cursor);
-              *p = Slot
+              *p = Slot;
             }
             App(box l, box r) if *l == Slot => {
               mem::swap(l, &mut cursor);
@@ -147,7 +150,7 @@ fn main() -> Result<(), std::io::Error> {
             }
           }
         } else {
-          println!("boop")
+          println!("boop");
         }
       }
       "$" => {
@@ -173,64 +176,34 @@ fn main() -> Result<(), std::io::Error> {
       s => {
         if let Ok(u) = s.parse::<u8>() {
           if cursor == Hole {
-            cursor = Expr::from_nat(u)
+            cursor = Expr::from_nat(u);
           } else {
-            cursor = App(box cursor, box Expr::from_nat(u))
+            cursor = App(box cursor, box Expr::from_nat(u));
           }
         } else if let Some(u) = s
-          .strip_prefix("[")
-          .and_then(|s| s.strip_suffix("]"))
+          .strip_prefix('[')
+          .and_then(|s| s.strip_suffix(']'))
           .and_then(|s| s.parse::<u8>().ok())
         {
           if cursor == Hole {
-            cursor = Var(u)
+            cursor = Var(u);
           } else {
-            cursor = App(box cursor, box Var(u))
+            cursor = App(box cursor, box Var(u));
           }
         } else {
-          println!("unrec'd cmd: {}", s)
+          println!("unrec'd cmd: {}", s);
         }
       }
     }
     if !matches!(cursor, Var(_) | Hole) {
       leaf_mode = false;
     }
-    println!(
-      "{}",
-      expr.to_string().replace(
-        "__",
-        (if leaf_mode {
-          format!("\x1b[4m{}\x1b[24m", cursor)
-        } else {
-          format!("\x1b[7m{}\x1b[27m", cursor)
-        })
-        .as_str()
-      ).replace(
-        "_#_",
-        (if leaf_mode {
-          format!("\x1b[4m{:#}\x1b[24m", cursor)
-        } else {
-          format!("\x1b[7m{:#}\x1b[27m", cursor)
-        })
-        .as_str()
-      ).replace(
-        "_+_",
-        (if leaf_mode {
-          format!("\x1b[4m{:+}\x1b[24m", cursor)
-        } else {
-          format!("\x1b[7m{:+}\x1b[27m", cursor)
-        })
-        .as_str()
-      ).replace(
-        "_+#_",
-        (if leaf_mode {
-          format!("\x1b[4m{:+#}\x1b[24m", cursor)
-        } else {
-          format!("\x1b[7m{:+#}\x1b[27m", cursor)
-        })
-        .as_str()
-      )
-    );
+    let dstr = DisplayStruct {
+      expr : &expr,
+      cursor : &cursor,
+      leaf_mode,
+    };
+    eprintln!("{:?}", dstr);
+    println!("{}", dstr);
   }
-  Ok(())
 }

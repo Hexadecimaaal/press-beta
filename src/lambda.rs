@@ -42,65 +42,6 @@ lazy_static! {
 }
 
 impl Expr {
-  pub fn shift(&self, v : u8) -> Expr {
-    match self {
-      Var(u) => {
-        if *u >= v {
-          Var(u + 1)
-        } else {
-          Var(*u)
-        }
-      }
-      Lam(e) => Lam(box e.shift(v + 1)),
-      App(l, r) => App(box l.shift(v), box r.shift(v)),
-      _ => self.clone(),
-    }
-  }
-  pub fn closed(&self, v : u8) -> bool {
-    match self {
-      Var(u) => *u <= v,
-      Lam(e) => e.closed(v + 1),
-      App(l, r) => l.closed(v) && r.closed(v),
-      _ => true,
-    }
-  }
-  pub fn unshift(&mut self, v : u8) {
-    match self {
-      Var(u) => {
-        if *u >= v {
-          *u = *u - 1
-        }
-      }
-      Lam(e) => e.unshift(v + 1),
-      App(l, r) => {
-        l.unshift(v);
-        r.unshift(v)
-      }
-      _ => {}
-    }
-  }
-  pub fn replace(&mut self, v : u8, to : &Expr) {
-    match self {
-      Var(u) => {
-        if *u == v {
-          *self = to.clone()
-        }
-      }
-      Lam(e) => {
-        if to.closed(0) {
-          e.replace(v + 1, to)
-        } else {
-          e.replace(v + 1, &to.shift(0))
-        }
-      }
-      App(l, r) => {
-        l.replace(v, to);
-        r.replace(v, to)
-      }
-      Hole | Slot => {}
-    }
-  }
-
   /// returns Some if replace FAILED
   pub fn replace_slot(&mut self, to : Expr) -> Option<Expr> {
     match self {
@@ -115,9 +56,8 @@ impl Expr {
   }
   pub fn find_slot_parent(&mut self) -> Option<&mut Expr> {
     match self {
-      Lam(box Slot) => Some(self),
+      Lam(box Slot) | App(box Slot, _) | App(_, box Slot) => Some(self),
       Lam(box e) => e.find_slot_parent(),
-      App(box Slot, _) | App(_, box Slot) => Some(self),
       App(box l, box r) => l.find_slot_parent().or_else(|| r.find_slot_parent()),
       _ => None,
     }
@@ -180,10 +120,79 @@ impl Expr {
       }
     }
   }
+}
+
+impl Expr {
+  #[must_use]
+  pub fn closed(&self, v : u8) -> bool {
+    match self {
+      Var(u) => *u <= v,
+      Lam(e) => e.closed(v + 1),
+      App(l, r) => l.closed(v) && r.closed(v),
+      _ => true,
+    }
+  }
+
+  pub fn replace(&mut self, to : &Expr) {
+    fn replace_(expr : &mut Expr, v : u8, to : &Expr, shift : u8) {
+      fn shift_(expr : &mut Expr, v : u8, amount : u8) {
+        match expr {
+          Var(u) => {
+            if *u >= v {
+              *u += amount;
+            }
+          }
+          Lam(e) => shift_(e, v + 1, amount),
+          App(l, r) => {
+            shift_(l, v, amount);
+            shift_(r, v, amount);
+          }
+          _ => {}
+        }
+      }
+      match expr {
+        Var(u) => {
+          if *u == v {
+            let mut new = to.clone();
+            shift_(&mut new, 0, shift);
+            *expr = new;
+          }
+        }
+        Lam(box e) => {
+          if to.closed(0) {
+            replace_(e, v + 1, to, shift);
+          } else {
+            replace_(e, v + 1, to, shift + 1);
+          }
+        }
+        App(box l, box r) => {
+          replace_(l, v, to, shift);
+          replace_(r, v, to, shift);
+        }
+        Hole | Slot => {}
+      }
+    }
+    replace_(self, 0, to, 0);
+  }
   pub fn beta(&mut self) -> bool {
+    fn unshift(expr : &mut Expr, v : u8) {
+      match expr {
+        Var(u) => {
+          if *u >= v {
+            *u -= 1;
+          }
+        }
+        Lam(e) => unshift(e, v + 1),
+        App(l, r) => {
+          unshift(l, v);
+          unshift(r, v);
+        }
+        _ => {}
+      }
+    }
     if let App(box Lam(e), r) = self {
-      e.unshift(1);
-      e.replace(0, &r);
+      unshift(e, 1);
+      e.replace(r);
       *self = mem::take(e);
       true
     } else {
@@ -201,46 +210,6 @@ impl Expr {
       redox.beta();
     }
   }
-
-  pub fn to_nat(&self) -> Option<u8> {
-    let mut ret = 0u8;
-    if let Lam(box Lam(box e)) = self {
-      let mut e = e;
-      while let App(box Var(1), eprime) = e {
-        ret += 1;
-        e = eprime;
-      }
-      if Var(0) == *e {
-        Some(ret)
-      } else {
-        None
-      }
-    } else {
-      None
-    }
-  }
-
-  pub fn from_nat(n : u8) -> Expr {
-    let mut ret = Var(0);
-    for _ in 0..n {
-      ret = App(box Var(1), box ret);
-    }
-    Lam(box Lam(box ret))
-  }
-}
-
-#[test]
-fn test_to_nat() {
-  assert_eq!(ZERO.to_nat(), Some(0u8));
-  assert_eq!(ONE.to_nat(), Some(1u8));
-}
-
-#[test]
-fn test_shift() {
-  assert_eq!(ID.clone().shift(0), *ID);
-  assert_eq!(ZERO.clone().shift(0), *ZERO);
-  assert_eq!(Var(0).shift(0), Var(1));
-  assert_eq!(ONE.clone().shift(0), *ONE);
 }
 
 #[test]
@@ -265,48 +234,100 @@ fn test_beta() {
         box Lam(box App(box Var(6), box Var(0)))
       ))
     ))
-  )
+  );
+}
+
+impl Expr {
+  #[must_use]
+  pub fn from_nat(n : u8) -> Expr {
+    let mut ret = Var(0);
+    for _ in 0..n {
+      ret = App(box Var(1), box ret);
+    }
+    Lam(box Lam(box ret))
+  }
+  #[must_use]
+  pub fn to_nat(&self) -> Option<u8> {
+    let mut ret = 0u8;
+    if let Lam(box Lam(box e)) = self {
+      let mut e = e;
+      while let App(box Var(1), eprime) = e {
+        ret += 1;
+        e = eprime;
+      }
+      if Var(0) == *e {
+        Some(ret)
+      } else {
+        None
+      }
+    } else {
+      None
+    }
+  }
+}
+
+#[test]
+fn test_to_nat() {
+  assert_eq!(ZERO.to_nat(), Some(0u8));
+  assert_eq!(ONE.to_nat(), Some(1u8));
 }
 
 const VAR_NUMERALS : [char; 11] = ['🄌', '➊', '➋', '➌', '➍', '➎', '➏', '➐', '➑', '➒', '➓'];
 
-impl Display for Expr {
-  fn fmt(&self, f : &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    if let Some(n) = self.to_nat() {
+#[derive(Debug)]
+pub struct DisplayStruct<'a> {
+  pub expr : &'a Expr,
+  pub cursor : &'a Expr,
+  pub leaf_mode : bool,
+}
+
+impl Display for DisplayStruct<'_> {
+  fn fmt(&self, f : &mut std::fmt::Formatter) -> std::fmt::Result {
+    if let Some(n) = self.expr.to_nat() {
       write!(f, "{}", n)
     } else {
-      match self {
-        _ if *ID == *self => write!(f, "I"),
-        _ if *CONST == *self => write!(f, "K"),
-        _ if *FORK == *self => write!(f, "S"),
-        _ if *SUCC == *self => write!(f, "SUCC"),
-        _ if *PLUS == *self => write!(f, "+"),
-        _ if *TIMES == *self => write!(f, "*"),
-        _ if *POWER == *self => write!(f, "^"),
+      match self.expr {
+        _ if *ID == *self.expr => write!(f, "I"),
+        _ if *CONST == *self.expr => write!(f, "K"),
+        _ if *FORK == *self.expr => write!(f, "S"),
+        _ if *SUCC == *self.expr => write!(f, "SUCC"),
+        _ if *PLUS == *self.expr => write!(f, "+"),
+        _ if *TIMES == *self.expr => write!(f, "*"),
+        _ if *POWER == *self.expr => write!(f, "^"),
         Var(u) => {
           if *u <= 10 {
             write!(f, "{}", VAR_NUMERALS[*u as usize])
           } else {
-            write!(f, "[{}]", *u)
+            write!(f, "[{}]", u)
           }
         }
-        Lam(e) => {
+        Lam(box e) => {
           if f.alternate() {
-            write!(f, "(𝛌{:+})", e)
+            write!(f, "(𝛌{:+})", DisplayStruct { expr : e, ..*self })
           } else {
-            write!(f, "𝛌{:+}", e)
+            write!(f, "𝛌{:+}", DisplayStruct { expr : e, ..*self })
           }
         }
         App(box l, box r) => {
           if f.sign_plus() {
-            write!(f, " ")?
+            write!(f, " ")?;
           }
           if f.alternate() {
-            write!(f, "(")?
+            write!(f, "(")?;
           }
-          match (l, r) {
-            (Lam(_), _) => write!(f, "{:#} {:#}", l, r),
-            (..) => write!(f, "{} {:#}", l, r),
+          match (l, self.cursor) {
+            (Lam(_), _) | (Slot, Lam(_)) => write!(
+              f,
+              "{:#} {:#}",
+              DisplayStruct { expr : l, ..*self },
+              DisplayStruct { expr : r, ..*self }
+            ),
+            _ => write!(
+              f,
+              "{} {:#}",
+              DisplayStruct { expr : l, ..*self },
+              DisplayStruct { expr : r, ..*self }
+            ),
           }?;
           if f.alternate() {
             write!(f, ")")
@@ -316,17 +337,29 @@ impl Display for Expr {
         }
         Hole => write!(f, "▪"),
         Slot => {
-          write!(f, "_")?;
-          if f.sign_plus() {
-            write!(f, "+")?;
+          if self.leaf_mode {
+            write!(f, "\x1b[4m")?;
+            self.cursor.fmt(f)?;
+            write!(f, "\x1b[24m")
+          } else {
+            write!(f, "\x1b[7m")?;
+            self.cursor.fmt(f)?;
+            write!(f, "\x1b[27m")
           }
-          if f.alternate() {
-            write!(f, "#")?;
-          }
-          write!(f, "_")
         }
       }
     }
+  }
+}
+
+impl Display for Expr {
+  fn fmt(&self, f : &mut std::fmt::Formatter) -> std::fmt::Result {
+    DisplayStruct {
+      expr : self,
+      cursor : &Hole,
+      leaf_mode : false,
+    }
+    .fmt(f)
   }
 }
 
