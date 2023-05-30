@@ -1,8 +1,8 @@
-#![feature(box_syntax, box_patterns)]
+#![feature(box_patterns, let_chains)]
 pub mod lambda;
-use crate::lambda::{DisplayStruct, Expr, PLUS, POWER, TIMES};
+use crate::lambda::{DisplayStruct, Expr, PLUS, POWER, TIMES, lam, app};
 use std::{io::stdin, mem};
-use Expr::*;
+use Expr::{App, Hole, Lam, Slot, Var};
 
 fn main() {
   let mut expr = Slot;
@@ -21,9 +21,9 @@ fn main() {
       "bs" => cursor = Hole,
       "l" => {
         if cursor == Hole {
-          expr.replace_slot(Lam(box Slot));
+          expr.replace_slot(lam(Slot));
         } else {
-          cursor = Lam(box cursor);
+          cursor = lam(cursor);
         }
       }
       "b" => {
@@ -42,13 +42,13 @@ fn main() {
         }
       }
       "dn" => match cursor {
-        Lam(box e) => {
-          expr.replace_slot(Lam(box Slot));
-          cursor = e;
+        Lam(e) => {
+          expr.replace_slot(lam(Slot));
+          cursor = *e;
         }
-        App(box l, r) => {
-          expr.replace_slot(App(box Slot, r));
-          cursor = l;
+        App(l, r) => {
+          expr.replace_slot(app(Slot, *r));
+          cursor = *l;
         }
         Hole | Var(_) => {
           if leaf_mode {
@@ -154,31 +154,31 @@ fn main() {
         }
       }
       "$" => {
-        expr.replace_slot(App(box cursor, box Slot));
+        expr.replace_slot(app(cursor, Slot));
         cursor = Hole;
       }
       "@" => {
-        expr.replace_slot(App(box Slot, box cursor));
+        expr.replace_slot(app(Slot, cursor));
         cursor = Hole;
       }
       "+" => match cursor {
         Hole => cursor = PLUS.clone(),
-        _ => cursor = App(box PLUS.clone(), box cursor),
+        _ => cursor = app(PLUS.clone(), cursor),
       },
       "*" => match cursor {
         Hole => cursor = TIMES.clone(),
-        _ => cursor = App(box TIMES.clone(), box cursor),
+        _ => cursor = app(TIMES.clone(), cursor),
       },
       "^" => match cursor {
         Hole => cursor = POWER.clone(),
-        _ => cursor = App(box POWER.clone(), box cursor),
+        _ => cursor = app(POWER.clone(), cursor),
       },
       s => {
         if let Ok(u) = s.parse::<u8>() {
           if cursor == Hole {
             cursor = Expr::from_nat(u);
           } else {
-            cursor = App(box cursor, box Expr::from_nat(u));
+            cursor = app(cursor, Expr::from_nat(u));
           }
         } else if let Some(u) = s
           .strip_prefix('[')
@@ -188,10 +188,10 @@ fn main() {
           if cursor == Hole {
             cursor = Var(u);
           } else {
-            cursor = App(box cursor, box Var(u));
+            cursor = app(cursor, Var(u));
           }
         } else {
-          println!("unrec'd cmd: {}", s);
+          println!("unrec'd cmd: {s}");
         }
       }
     }
@@ -203,7 +203,7 @@ fn main() {
       cursor : &cursor,
       leaf_mode,
     };
-    eprintln!("{:?}", dstr);
-    println!("{}", dstr);
+    eprintln!("{dstr:?}");
+    println!("{dstr}");
   }
 }

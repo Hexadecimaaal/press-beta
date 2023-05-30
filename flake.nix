@@ -2,10 +2,10 @@
   description = "";
 
   inputs = {
-    nixpkgs.url      = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    flake-utils.url  = "github:numtide/flake-utils";
+    flake-utils.url = "github:numtide/flake-utils";
     flake-utils.inputs.nixpkgs.follows = "nixpkgs";
   };
 
@@ -17,17 +17,27 @@
           inherit system overlays;
         };
       in
-      with pkgs;
+      with pkgs; let
+        rust = rust-bin.nightly.latest.default.override {
+              extensions = [ "rust-src" ];
+            };
+      in
       {
         devShell = mkShell {
           buildInputs = [
-            (rust-bin.nightly.latest.default.override {
-              extensions = [ "rust-src" ];
-            })
-            ncurses
-            lldb
-            python3
+            rust
           ];
+        };
+        packages.default = (makeRustPlatform {
+          rustc = rust;
+          cargo = rust;
+        }).buildRustPackage {
+          pname = "press-beta";
+          version = "0.0.0";
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+          };
+          src = ./.;
         };
       }
     );

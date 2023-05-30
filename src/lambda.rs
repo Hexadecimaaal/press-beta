@@ -12,33 +12,32 @@ pub enum Expr {
   Slot,
 }
 
-use Expr::*;
+#[inline]
+#[must_use]
+pub fn lam(e : Expr) -> Expr { Expr::Lam(Box::new(e)) }
+#[inline]
+#[must_use]
+pub fn app(l : Expr, r : Expr) -> Expr { Expr::App(Box::new(l), Box::new(r)) }
+
+use Expr::{App, Hole, Lam, Slot, Var};
 
 lazy_static! {
-  pub static ref ID: Expr = Lam(box Var(0));
-  static ref ZERO: Expr = Lam(box Lam(box Var(0)));
-  static ref CONST: Expr = Lam(box Lam(box (Var(1))));
-  static ref ONE: Expr = Lam(box Lam(box App(box Var(1), box Var(0))));
-  static ref FORK: Expr = Lam(box Lam(box Lam(box App(
-    box App(box Var(2), box Var(0)),
-    box App(box Var(1), box Var(0)),
+  pub static ref ID: Expr = lam(Var(0));
+  static ref ZERO: Expr = lam(lam(Var(0)));
+  static ref CONST: Expr = lam(lam(Var(1)));
+  static ref ONE: Expr = lam(lam(app(Var(1), Var(0))));
+  static ref FORK: Expr = lam(lam(lam(app(app(Var(2), Var(0)), app(Var(1), Var(0)),))));
+  pub static ref SUCC: Expr = lam(lam(lam(app(Var(1), app(app(Var(2), Var(1)), Var(0)),))));
+  pub static ref PLUS: Expr = lam(lam(lam(lam(app(
+    app(Var(3), Var(1)),
+    app(app(Var(2), Var(1)), Var(0)),
+  )))));
+  pub static ref TIMES: Expr = lam(lam(lam(lam(
+    app(app(Var(3), app(Var(2), Var(1))), Var(0),)
   ))));
-  pub static ref SUCC: Expr = Lam(box Lam(box Lam(box App(
-    box Var(1),
-    box App(box App(box Var(2), box Var(1)), box Var(0)),
+  pub static ref POWER: Expr = lam(lam(lam(lam(
+    app(app(app(Var(2), Var(3)), Var(1)), Var(0),)
   ))));
-  pub static ref PLUS: Expr = Lam(box Lam(box Lam(box Lam(box App(
-    box App(box Var(3), box Var(1)),
-    box App(box App(box Var(2), box Var(1)), box Var(0)),
-  )))));
-  pub static ref TIMES: Expr = Lam(box Lam(box Lam(box Lam(box App(
-    box App(box Var(3), box App(box Var(2), box Var(1))),
-    box Var(0),
-  )))));
-  pub static ref POWER: Expr = Lam(box Lam(box Lam(box Lam(box App(
-    box App(box App(box Var(2), box Var(3)), box Var(1)),
-    box Var(0),
-  )))));
 }
 
 impl Expr {
@@ -57,28 +56,28 @@ impl Expr {
   pub fn find_slot_parent(&mut self) -> Option<&mut Expr> {
     match self {
       Lam(box Slot) | App(box Slot, _) | App(_, box Slot) => Some(self),
-      Lam(box e) => e.find_slot_parent(),
-      App(box l, box r) => l.find_slot_parent().or_else(|| r.find_slot_parent()),
+      Lam(e) => e.find_slot_parent(),
+      App(l, r) => l.find_slot_parent().or_else(|| r.find_slot_parent()),
       _ => None,
     }
   }
   pub fn rightmost(&mut self) -> &mut Expr {
     match self {
       Var(_) | Hole | Slot => self,
-      Lam(box e) | App(_, box e) => e.rightmost(),
+      Lam(e) | App(_, e) => e.rightmost(),
     }
   }
   pub fn leftmost(&mut self) -> &mut Expr {
     match self {
       Var(_) | Hole | Slot => self,
-      Lam(box e) | App(box e, _) => e.leftmost(),
+      Lam(e) | App(e, _) => e.leftmost(),
     }
   }
   pub fn find_slot_leftsib(&mut self) -> Option<(&mut Expr, &mut Expr)> {
     match self {
       Var(_) | Hole | Slot => None,
-      Lam(box e) => e.find_slot_leftsib(),
-      App(box l, box r) => {
+      Lam(e) => e.find_slot_leftsib(),
+      App(l, r) => {
         if r.leftmost() == &Slot {
           Some((r.leftmost(), l.rightmost()))
         } else {
@@ -90,8 +89,8 @@ impl Expr {
   pub fn find_slot_rightsib(&mut self) -> Option<(&mut Expr, &mut Expr)> {
     match self {
       Var(_) | Hole | Slot => None,
-      Lam(box e) => e.find_slot_rightsib(),
-      App(box l, box r) => {
+      Lam(e) => e.find_slot_rightsib(),
+      App(l, r) => {
         if l.rightmost() == &Slot {
           Some((l.rightmost(), r.leftmost()))
         } else {
@@ -114,8 +113,8 @@ impl Expr {
       Some(self)
     } else {
       match self {
-        Lam(box e) => e.find_redux(),
-        App(box l, box r) => l.find_redux().or_else(|| r.find_redux()),
+        Lam(e) => e.find_redux(),
+        App(l, r) => l.find_redux().or_else(|| r.find_redux()),
         _ => None,
       }
     }
@@ -158,14 +157,14 @@ impl Expr {
             *expr = new;
           }
         }
-        Lam(box e) => {
+        Lam(e) => {
           if to.closed(0) {
             replace_(e, v + 1, to, shift);
           } else {
             replace_(e, v + 1, to, shift + 1);
           }
         }
-        App(box l, box r) => {
+        App(l, r) => {
           replace_(l, v, to, shift);
           replace_(r, v, to, shift);
         }
@@ -190,7 +189,7 @@ impl Expr {
         _ => {}
       }
     }
-    if let App(box Lam(e), r) = self {
+    if let App(box Lam(e), box r) = self {
       unshift(e, 1);
       e.replace(r);
       *self = mem::take(e);
@@ -214,25 +213,19 @@ impl Expr {
 
 #[test]
 fn test_beta() {
-  let mut idid = App(box ID.clone(), box ID.clone());
+  let mut idid = app(ID.clone(), ID.clone());
   idid.beta();
   assert_eq!(idid, *ID);
-  let mut free_beta = App(
-    box Lam(box Lam(box App(
-      box App(box Var(3), box Var(1)),
-      box Lam(box App(box Var(0), box Var(2))),
-    ))),
-    box Lam(box App(box Var(4), box Var(0))),
+  let mut free_beta = app(
+    lam(lam(app(app(Var(3), Var(1)), lam(app(Var(0), Var(2)))))),
+    lam(app(Var(4), Var(0))),
   );
   free_beta.beta();
   assert_eq!(
     free_beta,
-    Lam(box App(
-      box App(box Var(2), box Lam(box App(box Var(5), box Var(0)))),
-      box Lam(box App(
-        box Var(0),
-        box Lam(box App(box Var(6), box Var(0)))
-      ))
+    lam(app(
+      app(Var(2), lam(app(Var(5), Var(0)))),
+      lam(app(Var(0), lam(app(Var(6), Var(0)))))
     ))
   );
 }
@@ -242,16 +235,16 @@ impl Expr {
   pub fn from_nat(n : u8) -> Expr {
     let mut ret = Var(0);
     for _ in 0..n {
-      ret = App(box Var(1), box ret);
+      ret = app(Var(1), ret);
     }
-    Lam(box Lam(box ret))
+    lam(lam(ret))
   }
   #[must_use]
   pub fn to_nat(&self) -> Option<u8> {
     let mut ret = 0u8;
     if let Lam(box Lam(box e)) = self {
       let mut e = e;
-      while let App(box Var(1), eprime) = e {
+      while let App(box Var(1), box eprime) = e {
         ret += 1;
         e = eprime;
       }
@@ -284,7 +277,7 @@ pub struct DisplayStruct<'a> {
 impl Display for DisplayStruct<'_> {
   fn fmt(&self, f : &mut std::fmt::Formatter) -> std::fmt::Result {
     if let Some(n) = self.expr.to_nat() {
-      write!(f, "{}", n)
+      write!(f, "{n}")
     } else {
       match self.expr {
         _ if *ID == *self.expr => write!(f, "I"),
@@ -298,24 +291,24 @@ impl Display for DisplayStruct<'_> {
           if *u <= 10 {
             write!(f, "{}", VAR_NUMERALS[*u as usize])
           } else {
-            write!(f, "[{}]", u)
+            write!(f, "[{u}]")
           }
         }
-        Lam(box e) => {
+        Lam(e) => {
           if f.alternate() {
             write!(f, "(𝛌{:+})", DisplayStruct { expr : e, ..*self })
           } else {
             write!(f, "𝛌{:+}", DisplayStruct { expr : e, ..*self })
           }
         }
-        App(box l, box r) => {
+        App(l, r) => {
           if f.sign_plus() {
             write!(f, " ")?;
           }
           if f.alternate() {
             write!(f, "(")?;
           }
-          match (l, self.cursor) {
+          match (&**l, self.cursor) {
             (Lam(_), _) | (Slot, Lam(_)) => write!(
               f,
               "{:#} {:#}",
@@ -366,24 +359,24 @@ impl Display for Expr {
 #[test]
 fn test_with_formatting() {
   assert_eq!(ID.to_string(), "I");
-  assert_eq!(App(box ID.clone(), box ID.clone()).to_string(), "I I");
+  assert_eq!(app(ID.clone(), ID.clone()).to_string(), "I I");
   assert_eq!(ZERO.to_string(), "0");
   assert_eq!(ONE.to_string(), "1");
   assert_eq!(Expr::from_nat(10).to_string(), "10");
-  assert_eq!(Lam(box Expr::from_nat(10)).to_string(), "𝛌10");
+  assert_eq!(lam(Expr::from_nat(10)).to_string(), "𝛌10");
 
   assert_eq!(PLUS.to_string(), "+");
-  let mut p1 = App(box PLUS.clone(), box ONE.clone());
+  let mut p1 = app(PLUS.clone(), ONE.clone());
   assert_eq!(p1.to_string(), "+ 1");
   p1.hnf();
   assert_eq!(p1.to_string(), "𝛌𝛌𝛌 1 ➊ (➋ ➊ 🄌)");
   p1.nf();
   assert_eq!(p1.to_string(), "SUCC");
-  let mut p11 = App(box p1, box ONE.clone());
+  let mut p11 = app(p1, ONE.clone());
   p11.nf();
   assert_eq!(p11.to_string(), "2");
 
-  let mut pow24 = App(box App(box POWER.clone(), box p11), box Expr::from_nat(4));
+  let mut pow24 = app(app(POWER.clone(), p11), Expr::from_nat(4));
   assert_eq!(pow24.to_string(), "^ 2 4");
   pow24.head().unwrap().beta();
   assert_eq!(pow24.to_string(), "(𝛌𝛌𝛌 ➋ 2 ➊ 🄌) 4");
