@@ -138,9 +138,9 @@ fn main() {
               mem::swap(e, &mut cursor);
               *p = Slot;
             }
-            App(box l, box r) if *l == Slot => {
-              mem::swap(l, &mut cursor);
-              mem::swap(r, &mut cursor);
+            App(l, r) if **l == Slot => {
+              mem::swap::<Expr>(l, &mut cursor);
+              mem::swap::<Expr>(r, &mut cursor);
             }
             _ => {
               let mut new = Slot;
