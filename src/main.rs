@@ -1,209 +1,72 @@
-#![feature(box_patterns, let_chains)]
-pub mod lambda;
-use crate::lambda::{DisplayStruct, Expr, PLUS, POWER, TIMES, lam, app};
-use std::{io::stdin, mem};
-use Expr::{App, Hole, Lam, Slot, Var};
+#![no_std]
+#![no_main]
+#![feature(prelude_2024, box_patterns, let_chains, thread_local)]
 
-fn main() {
-  let mut expr = Slot;
-  let mut cursor = Hole;
-  let keys = stdin()
-    .lines()
-    .map(std::result::Result::unwrap)
-    .flat_map(|l| {
-      l.split_whitespace()
-        .map(std::borrow::ToOwned::to_owned)
-        .collect::<Vec<_>>()
-    });
-  let mut leaf_mode = true;
-  for cmd in keys {
-    match cmd.as_str() {
-      "bs" => cursor = Hole,
-      "l" => {
-        if cursor == Hole {
-          expr.replace_slot(lam(Slot));
-        } else {
-          cursor = lam(cursor);
-        }
-      }
-      "b" => {
-        if !cursor.beta() {
-          println!("boop(beta)");
-        }
-      }
-      "redux" => {
-        if let Some(hd) = cursor.find_redux() {
-          let mut new = Slot;
-          mem::swap(hd, &mut new);
-          expr.replace_slot(cursor);
-          cursor = new;
-        } else {
-          println!("boop(redux)");
-        }
-      }
-      "dn" => match cursor {
-        Lam(e) => {
-          expr.replace_slot(lam(Slot));
-          cursor = *e;
-        }
-        App(l, r) => {
-          expr.replace_slot(app(Slot, *r));
-          cursor = *l;
-        }
-        Hole | Var(_) => {
-          if leaf_mode {
-            println!("boop");
-          } else {
-            leaf_mode = true;
-          }
-        }
-        Slot => panic!(),
-      },
-      "up" => {
-        if leaf_mode {
-          leaf_mode = false;
-        } else if let Some(p) = expr.find_slot_parent() {
-          if let App(box Slot, box e) | App(box e, box Slot) = p && cursor == Hole {
-            mem::swap(e, &mut cursor);
-            *p = Slot;
-          } else {
-            let mut new = Slot;
-            mem::swap(p, &mut new);
-            new.replace_slot(cursor);
-            cursor = new;
-          }
-        } else {
-          println!("boop");
-        }
-      }
-      "top" => {
-        expr.replace_slot(cursor);
-        cursor = expr;
-        expr = Slot;
-      }
-      "lm" => {
-        let mut new = Slot;
-        mem::swap(cursor.leftmost(), &mut new);
-        expr.replace_slot(cursor);
-        cursor = new;
-        leaf_mode = true;
-      }
-      "rm" => {
-        let mut new = Slot;
-        mem::swap(cursor.rightmost(), &mut new);
-        expr.replace_slot(cursor);
-        cursor = new;
-        leaf_mode = true;
-      }
-      "lt" => {
-        if leaf_mode {
-          if let Some((slot, sib)) = expr.find_slot_leftsib() {
-            mem::swap(slot, &mut cursor);
-            mem::swap(sib, &mut cursor);
-          } else {
-            leaf_mode = false;
-          }
-        } else if let Some(p) = expr.find_slot_parent() {
-          match p {
-            App(box e, box Slot) if cursor == Hole => {
-              mem::swap(e, &mut cursor);
-              *p = Slot;
-            }
-            App(box l, box r) if *r == Slot => {
-              mem::swap(r, &mut cursor);
-              mem::swap(l, &mut cursor);
-            }
-            _ => {
-              let mut new = Slot;
-              mem::swap(p, &mut new);
-              new.replace_slot(cursor);
-              cursor = new;
-            }
-          }
-        } else {
-          println!("boop");
-        }
-      }
-      "rt" => {
-        if leaf_mode {
-          if let Some((slot, sib)) = expr.find_slot_rightsib() {
-            mem::swap(slot, &mut cursor);
-            mem::swap(sib, &mut cursor);
-          } else {
-            leaf_mode = false;
-          }
-        } else if let Some(p) = expr.find_slot_parent() {
-          match p {
-            App(box Slot, box e) if cursor == Hole => {
-              mem::swap(e, &mut cursor);
-              *p = Slot;
-            }
-            App(l, r) if **l == Slot => {
-              mem::swap::<Expr>(l, &mut cursor);
-              mem::swap::<Expr>(r, &mut cursor);
-            }
-            _ => {
-              let mut new = Slot;
-              mem::swap(p, &mut new);
-              new.replace_slot(cursor);
-              cursor = new;
-            }
-          }
-        } else {
-          println!("boop");
-        }
-      }
-      "$" => {
-        expr.replace_slot(app(cursor, Slot));
-        cursor = Hole;
-      }
-      "@" => {
-        expr.replace_slot(app(Slot, cursor));
-        cursor = Hole;
-      }
-      "+" => match cursor {
-        Hole => cursor = PLUS.clone(),
-        _ => cursor = app(PLUS.clone(), cursor),
-      },
-      "*" => match cursor {
-        Hole => cursor = TIMES.clone(),
-        _ => cursor = app(TIMES.clone(), cursor),
-      },
-      "^" => match cursor {
-        Hole => cursor = POWER.clone(),
-        _ => cursor = app(POWER.clone(), cursor),
-      },
-      s => {
-        if let Ok(u) = s.parse::<u8>() {
-          if cursor == Hole {
-            cursor = Expr::from_nat(u);
-          } else {
-            cursor = app(cursor, Expr::from_nat(u));
-          }
-        } else if let Some(u) = s
-          .strip_prefix('[')
-          .and_then(|s| s.strip_suffix(']'))
-          .and_then(|s| s.parse::<u8>().ok())
-        {
-          if cursor == Hole {
-            cursor = Var(u);
-          } else {
-            cursor = app(cursor, Var(u));
-          }
-        } else {
-          println!("unrec'd cmd: {s}");
-        }
-      }
-    }
-    if !matches!(cursor, Var(_) | Hole) {
-      leaf_mode = false;
-    }
-    let dstr = DisplayStruct {
-      expr : &expr,
-      cursor : &cursor,
-      leaf_mode,
-    };
-    eprintln!("{dstr:?}");
-    println!("{dstr}");
+extern crate alloc;
+
+pub mod lambda;
+
+use alloc_cortex_m::CortexMHeap;
+#[global_allocator]
+static ALLOCATOR : CortexMHeap = CortexMHeap::empty();
+
+use cortex_m_rt::entry;
+use defmt::info;
+use defmt_rtt as _;
+use embedded_hal::digital::v2::OutputPin;
+use panic_probe as _;
+use rp2040_hal as hal;
+
+use hal::{
+  clocks::{init_clocks_and_plls, Clock},
+  sio::Sio,
+  pac,
+  watchdog::Watchdog,
+};
+
+#[link_section = ".boot2"]
+#[used]
+pub static BOOT2 : [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+
+#[entry]
+fn main() -> ! {
+  info!("Program start");
+  let mut pac = pac::Peripherals::take().unwrap();
+  let core = pac::CorePeripherals::take().unwrap();
+  let mut watchdog = Watchdog::new(pac.WATCHDOG);
+  let sio = Sio::new(pac.SIO);
+
+  // External high-speed crystal on the pico board is 12Mhz
+  let external_xtal_freq_hz = 12_000_000u32;
+  let clocks = init_clocks_and_plls(
+    external_xtal_freq_hz,
+    pac.XOSC,
+    pac.CLOCKS,
+    pac.PLL_SYS,
+    pac.PLL_USB,
+    &mut pac.RESETS,
+    &mut watchdog,
+  )
+  .ok()
+  .unwrap();
+
+  let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+
+  let pins = hal::gpio::Pins::new(
+    pac.IO_BANK0,
+    pac.PADS_BANK0,
+    sio.gpio_bank0,
+    &mut pac.RESETS,
+  );
+
+  let mut led_pin = pins.gpio25.into_push_pull_output();
+
+  loop {
+    info!("on!");
+    led_pin.set_high().unwrap();
+    delay.delay_ms(500);
+    info!("off!");
+    led_pin.set_low().unwrap();
+    delay.delay_ms(500);
   }
 }
