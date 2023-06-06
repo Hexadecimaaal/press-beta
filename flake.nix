@@ -46,6 +46,8 @@
             }))
             libusb1
             flip-link
+            probe-run
+            probe-rs-cli
           ];
         };
         packages.default = (makeRustPlatform {

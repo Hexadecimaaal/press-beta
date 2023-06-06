@@ -1,36 +1,35 @@
 #![no_std]
 #![no_main]
-#![feature(prelude_2024, box_patterns, let_chains, thread_local)]
+#![feature(prelude_2024, box_patterns, let_chains)]
 
 extern crate alloc;
 
 pub mod lambda;
+pub mod lcd;
 
 use alloc_cortex_m::CortexMHeap;
 #[global_allocator]
 static ALLOCATOR : CortexMHeap = CortexMHeap::empty();
 
-use cortex_m_rt::entry;
-use defmt::info;
-use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
+use hal::gpio::FunctionSpi;
 use panic_probe as _;
-use rp2040_hal as hal;
+use rp_pico::entry;
+use rp_pico::hal;
+use rtt_target::rprintln;
+use rtt_target::rtt_init_print;
 
 use hal::{
   clocks::{init_clocks_and_plls, Clock},
-  sio::Sio,
   pac,
+  sio::Sio,
   watchdog::Watchdog,
 };
 
-#[link_section = ".boot2"]
-#[used]
-pub static BOOT2 : [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
-
 #[entry]
 fn main() -> ! {
-  info!("Program start");
+  rtt_init_print!();
+  rprintln!("Program start");
   let mut pac = pac::Peripherals::take().unwrap();
   let core = pac::CorePeripherals::take().unwrap();
   let mut watchdog = Watchdog::new(pac.WATCHDOG);
@@ -61,11 +60,33 @@ fn main() -> ! {
 
   let mut led_pin = pins.gpio25.into_push_pull_output();
 
+  let _ = pins.gpio2.into_mode::<FunctionSpi>();
+  let _ = pins.gpio3.into_mode::<FunctionSpi>();
+  let _ = pins.gpio4.into_mode::<FunctionSpi>();
+
+  let mut lcd = lcd::Lcd::new(
+    pins.gpio0,
+    pins.gpio5,
+    pins.gpio1,
+    hal::spi::Spi::<_, _, 8>::new(pac.SPI0),
+    &mut pac.RESETS,
+  );
+
+  lcd.lcd_init(&mut delay);
+  lcd.clear();
+
+  lcd.locate(0, 0);
+  for c in lcd::CHAR_LIST {
+    lcd.write_or_wrap(lcd::font_map(*c), false);
+    lcd.data_write(&[0]);
+  }
+  lcd.swrite_wrap("On the other hand, we denounce with righteous indignation and dislike men who are so beguiled and demoralized by the charms of pleasure of the moment, so blinded by desire");
+
   loop {
-    info!("on!");
+    rprintln!("on!");
     led_pin.set_high().unwrap();
     delay.delay_ms(500);
-    info!("off!");
+    rprintln!("off!");
     led_pin.set_low().unwrap();
     delay.delay_ms(500);
   }

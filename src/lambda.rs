@@ -2,7 +2,7 @@ extern crate alloc;
 use alloc::{boxed::Box, fmt::Display};
 use core::prelude::rust_2024::*;
 use core::{char, fmt, matches, mem, u32, usize, write};
-use once_cell::unsync::Lazy;
+use once_cell::sync::Lazy;
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum Expr {
@@ -24,29 +24,22 @@ pub fn app(l : Expr, r : Expr) -> Expr { Expr::App(Box::new(l), Box::new(r)) }
 
 use Expr::{App, Hole, Lam, Slot, Var};
 
-#[thread_local]
 pub static ID : Lazy<Expr> = Lazy::new(|| lam(Var(0)));
 // static ZERO: Expr = lam(lam(Var(0)));
-#[thread_local]
 pub static CONST : Lazy<Expr> = Lazy::new(|| lam(lam(Var(1))));
 // static  ONE: Expr = lam(lam(app(Var(1), Var(0))));
-#[thread_local]
 pub static FORK : Lazy<Expr> =
   Lazy::new(|| lam(lam(lam(app(app(Var(2), Var(0)), app(Var(1), Var(0)))))));
-#[thread_local]
 pub static SUCC : Lazy<Expr> =
   Lazy::new(|| lam(lam(lam(app(Var(1), app(app(Var(2), Var(1)), Var(0)))))));
-#[thread_local]
 pub static PLUS : Lazy<Expr> = Lazy::new(|| {
   lam(lam(lam(lam(app(
     app(Var(3), Var(1)),
     app(app(Var(2), Var(1)), Var(0)),
   )))))
 });
-#[thread_local]
 pub static TIMES : Lazy<Expr> =
   Lazy::new(|| lam(lam(lam(lam(app(app(Var(3), app(Var(2), Var(1))), Var(0)))))));
-#[thread_local]
 pub static POWER : Lazy<Expr> =
   Lazy::new(|| lam(lam(lam(lam(app(app(app(Var(2), Var(3)), Var(1)), Var(0)))))));
 
@@ -306,9 +299,9 @@ impl Display for DisplayStruct<'_> {
         }
         Lam(e) => {
           if f.alternate() {
-            write!(f, "(𝛌{:+})", DisplayStruct { expr : e, ..*self })
+            write!(f, "(λ{:+})", DisplayStruct { expr : e, ..*self })
           } else {
-            write!(f, "𝛌{:+}", DisplayStruct { expr : e, ..*self })
+            write!(f, "λ{:+}", DisplayStruct { expr : e, ..*self })
           }
         }
         App(l, r) => {
