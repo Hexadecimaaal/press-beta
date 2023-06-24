@@ -25,4 +25,5 @@ j = dict(sorted(map(lambda p: (int(p[0]), remove_trailing(list(transpose(p[1])))
 
 print(list(map(lambda p: chr(p[0]), j.items())))
 
-print(list(map(lambda p: p[1], j.items())))
+for i in map(lambda p: p[1], j.items()):
+  print("&", i, end=", ")

@@ -24,6 +24,7 @@ embedded-time = "0.12.1"
 panic-probe = { version = "0.3.1", features = ["print-rtt"] }
 rtt-target = "0.4.0"
 fugit = "0.3.6"
+nb = "1.1.0"
 
 # [[bin]]
 # name = "pico"
@@ -32,3 +33,10 @@ fugit = "0.3.6"
 # [[bin]]
 # name = "press-beta"
 # target = "x86_64-linux-gnu"
+
+[profile.dev]
+opt-level = 3
+lto = true
+
+[profile.dev.package."*"] # +
+opt-level = 3 # +

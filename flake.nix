@@ -19,7 +19,7 @@
       in
       with pkgs; let
         rust = rust-bin.nightly.latest.default.override {
-          extensions = [ "rust-src" ];
+          extensions = [ "rust-src" "llvm-tools-preview" ];
           targets = [ "thumbv6m-none-eabi" ];
         };
       in
@@ -27,6 +27,7 @@
         devShell = mkShell {
           buildInputs = [
             rust
+            cargo-binutils
             (openocd.overrideAttrs (old: {
               src = fetchFromGitHub {
                 owner = "raspberrypi";

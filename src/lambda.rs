@@ -214,25 +214,6 @@ impl Expr {
   }
 }
 
-// #[test]
-// fn test_beta() {
-//   let mut idid = app(ID.clone(), ID.clone());
-//   idid.beta();
-//   assert_eq!(idid, *ID);
-//   let mut free_beta = app(
-//     lam(lam(app(app(Var(3), Var(1)), lam(app(Var(0), Var(2)))))),
-//     lam(app(Var(4), Var(0))),
-//   );
-//   free_beta.beta();
-//   assert_eq!(
-//     free_beta,
-//     lam(app(
-//       app(Var(2), lam(app(Var(5), Var(0)))),
-//       lam(app(Var(0), lam(app(Var(6), Var(0)))))
-//     ))
-//   );
-// }
-
 impl Expr {
   #[must_use]
   pub fn from_nat(n : u32) -> Expr {
@@ -261,20 +242,26 @@ impl Expr {
     }
   }
 }
-
-// #[test]
-// fn test_to_nat() {
-//   assert_eq!(ZERO.to_nat(), Some(0u32));
-//   assert_eq!(ONE.to_nat(), Some(1u32));
-// }
-
 const VAR_NUMERALS : [char; 11] = ['🄌', '➊', '➋', '➌', '➍', '➎', '➏', '➐', '➑', '➒', '➓'];
+const VAR_LEAF : [char; 11] = ['🄋', '➀', '➁', '➂', '➃', '➄', '➅', '➆', '➇', '➈', '➉'];
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum LeafMode {
+  No,
+  Leaf,
+  InputDot,
+}
 
 #[derive(Debug)]
 pub struct DisplayStruct<'a> {
   pub expr : &'a Expr,
   pub cursor : &'a Expr,
-  pub leaf_mode : bool,
+  pub leaf_mode : LeafMode,
+}
+
+impl DisplayStruct<'_> {
+  pub const CURSOR_START : char = '\u{e000}';
+  pub const CURSOR_END : char = '\u{e001}';
 }
 
 impl Display for DisplayStruct<'_> {
@@ -292,7 +279,15 @@ impl Display for DisplayStruct<'_> {
         _ if *POWER == *self.expr => write!(f, "^"),
         Var(u) => {
           if *u <= 10 {
-            write!(f, "{}", VAR_NUMERALS[*u as usize])
+            write!(
+              f,
+              "{}",
+              if f.sign_aware_zero_pad() {
+                VAR_LEAF[*u as usize]
+              } else {
+                VAR_NUMERALS[*u as usize]
+              }
+            )
           } else {
             write!(f, "[{u}]")
           }
@@ -333,14 +328,14 @@ impl Display for DisplayStruct<'_> {
         }
         Hole => write!(f, "▪"),
         Slot => {
-          if self.leaf_mode {
-            write!(f, "\x1b[4m")?;
-            self.cursor.fmt(f)?;
-            write!(f, "\x1b[24m")
+          if let Var(u) = self.cursor && self.leaf_mode == LeafMode::Leaf {
+            write!(f, "{}", VAR_LEAF[*u as usize])
+          } else if *self.cursor == Hole && self.leaf_mode == LeafMode::InputDot {
+            write!(f, "⬤")
           } else {
-            write!(f, "\x1b[7m")?;
+            write!(f, "{}", Self::CURSOR_START)?;
             self.cursor.fmt(f)?;
-            write!(f, "\x1b[27m")
+            write!(f, "{}", Self::CURSOR_END)
           }
         }
       }
@@ -349,44 +344,13 @@ impl Display for DisplayStruct<'_> {
 }
 
 impl Display for Expr {
+  #[inline]
   fn fmt(&self, f : &mut fmt::Formatter) -> fmt::Result {
     DisplayStruct {
       expr : self,
       cursor : &Hole,
-      leaf_mode : false,
+      leaf_mode : LeafMode::No,
     }
     .fmt(f)
   }
 }
-
-// #[test]
-// fn test_with_formatting() {
-//   assert_eq!(ID.to_string(), "I");
-//   assert_eq!(app(ID.clone(), ID.clone()).to_string(), "I I");
-//   assert_eq!(ZERO.to_string(), "0");
-//   assert_eq!(ONE.to_string(), "1");
-//   assert_eq!(Expr::from_nat(10).to_string(), "10");
-//   assert_eq!(lam(Expr::from_nat(10)).to_string(), "𝛌10");
-
-//   assert_eq!(PLUS.to_string(), "+");
-//   let mut p1 = app(PLUS.clone(), ONE.clone());
-//   assert_eq!(p1.to_string(), "+ 1");
-//   p1.hnf();
-//   assert_eq!(p1.to_string(), "𝛌𝛌𝛌 1 ➊ (➋ ➊ 🄌)");
-//   p1.nf();
-//   assert_eq!(p1.to_string(), "SUCC");
-//   let mut p11 = app(p1, ONE.clone());
-//   p11.nf();
-//   assert_eq!(p11.to_string(), "2");
-
-//   let mut pow24 = app(app(POWER.clone(), p11), Expr::from_nat(4));
-//   assert_eq!(pow24.to_string(), "^ 2 4");
-//   pow24.head().unwrap().beta();
-//   assert_eq!(pow24.to_string(), "(𝛌𝛌𝛌 ➋ 2 ➊ 🄌) 4");
-//   pow24.beta();
-//   assert_eq!(pow24.to_string(), "𝛌𝛌 4 2 ➊ 🄌");
-//   pow24.find_redux().unwrap().beta();
-//   assert_eq!(pow24.to_string(), "𝛌𝛌 (𝛌 2 (2 (2 (2 🄌)))) ➊ 🄌");
-//   pow24.nf();
-//   assert_eq!(pow24.to_string(), "16");
-// }

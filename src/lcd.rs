@@ -1,6 +1,9 @@
+use core::fmt;
+
 use cortex_m::delay::Delay;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::prelude::_embedded_hal_blocking_spi_Write;
+use embedded_hal::spi::FullDuplex;
 use fugit::RateExtU32;
 use hal::gpio::Pin;
 use hal::gpio::PinId;
@@ -11,7 +14,10 @@ use hal::gpio::ValidPinMode;
 use hal::pac;
 use hal::spi::Disabled;
 use hal::Spi;
+use nb::block;
 use rp_pico::hal;
+
+use crate::lambda::DisplayStruct;
 
 pub struct Lcd<P0, P1, P2, S0>
 where
@@ -26,6 +32,8 @@ where
   spi : hal::Spi<hal::spi::Enabled, S0, 8>,
   current_page : u8,
   current_col : u8,
+  inverted_mode : bool,
+  line_break_symbol : bool,
 }
 
 const WIDTH : u8 = 128;
@@ -52,11 +60,13 @@ where
       spi : spi.init(
         resets,
         125_000_000u32.Hz(),
-        1_000_000u32.Hz(),
+        16_000_000u32.Hz(),
         &embedded_hal::spi::MODE_3,
       ),
       current_col : 0,
       current_page : 0,
+      inverted_mode : false,
+      line_break_symbol : true,
     }
   }
 
@@ -71,8 +81,15 @@ where
   #[allow(clippy::cast_possible_truncation)]
   pub fn data_write(&mut self, data : &[u8]) {
     self.chip_select.set_low().unwrap();
-    self.spi.write(data).unwrap();
-
+    for byte in data {
+      if self.inverted_mode {
+        block!(self.spi.send(!byte)).unwrap();
+        block!(self.spi.read()).unwrap();
+      } else {
+        block!(self.spi.send(*byte)).unwrap();
+        block!(self.spi.read()).unwrap();
+      }
+    }
     self.current_col = ((self.current_col as usize + data.len()) % 132) as u8;
     self.chip_select.set_high().unwrap();
   }
@@ -113,22 +130,36 @@ where
   }
 
   #[allow(clippy::cast_possible_truncation)]
-  pub fn write_or_wrap(&mut self, data : &[u8], symbol : bool) {
+  pub fn write_or_wrap(&mut self, data : &[u8]) {
     if self.current_col + data.len() as u8 > WIDTH {
       self.wrap();
-      if symbol {
+      if self.line_break_symbol {
         self.data_write(&[4, 16, 64, 0]);
       }
     }
     self.data_write(data);
+    self.data_write(&[0]);
+  }
+
+  pub fn write_or_wrap_char(&mut self, c : char) {
+    if c == '\n' {
+      self.wrap();
+    } else if c == DisplayStruct::CURSOR_START {
+      self.inverted_mode = true;
+      if self.current_col != 0 {
+        self.locate(self.current_page, self.current_col - 1);
+        self.data_write(&[0]);
+      }
+    } else if c == DisplayStruct::CURSOR_END {
+      self.inverted_mode = false;
+    } else {
+      self.write_or_wrap(font_map(c));
+    }
   }
 
   pub fn swrite(&mut self, s : &str) {
-    let mut written = false;
     for c in s.chars() {
-      self.write_or_wrap(font_map(c), written);
-      self.data_write(&[0]);
-      written = true;
+      self.write_or_wrap_char(c);
     }
   }
 
@@ -136,6 +167,9 @@ where
     for word in s.split_whitespace() {
       let mut columns = 0;
       for c in word.chars() {
+        if c == '\n' {
+          break;
+        }
         columns += font_map(c).len();
       }
       columns += word.len() - 1; // margins
@@ -144,12 +178,37 @@ where
         self.wrap();
       }
       self.swrite(word);
-      self.data_write(&[0; 5]);
+      self.data_write(font_map(' '));
     }
   }
 }
 
-static FONT_DATA : &[&[u8]] = &[
+impl<P0, P1, P2, S0> fmt::Write for Lcd<P0, P1, P2, S0>
+where
+  P0 : PinId,
+  P1 : PinId,
+  P2 : PinId,
+  S0 : hal::spi::SpiDevice,
+{
+  fn write_str(&mut self, s : &str) -> fmt::Result {
+    self.swrite(s);
+    Ok(())
+  }
+
+  fn write_char(&mut self, c : char) -> fmt::Result {
+    self.write_or_wrap_char(c);
+    Ok(())
+  }
+
+  #[inline]
+  fn write_fmt(mut self: &mut Self, args : fmt::Arguments<'_>) -> fmt::Result {
+    fmt::write(&mut self, args)
+  }
+}
+
+const FONT_DATA_LEN : usize = 124;
+
+static FONT_DATA : [&[u8]; FONT_DATA_LEN] = [
   &[95],
   &[7, 0, 7],
   &[36, 126, 36, 126, 36],
@@ -251,10 +310,20 @@ static FONT_DATA : &[&[u8]] = &[
   &[96, 25, 6, 24, 96],
   &[56, 68, 64, 32, 64, 68, 56],
   &[28, 28, 28],
+  &[99, 65, 36, 62, 32, 65, 99],
+  &[99, 65, 38, 50, 46, 65, 99],
+  &[99, 65, 42, 42, 62, 65, 99],
+  &[99, 65, 24, 20, 62, 81, 99],
+  &[99, 65, 46, 42, 58, 65, 99],
+  &[99, 65, 28, 42, 16, 65, 99],
+  &[99, 65, 50, 10, 6, 65, 99],
+  &[99, 65, 62, 42, 62, 65, 99],
+  &[99, 65, 46, 42, 30, 65, 99],
+  &[65, 62, 0, 62, 34, 62, 65],
   &[62, 127, 91, 65, 95, 127, 62],
   &[62, 127, 89, 77, 81, 127, 62],
   &[62, 127, 85, 85, 65, 127, 62],
-  &[62, 127, 103, 107, 65, 127, 62],
+  &[62, 127, 103, 107, 65, 111, 62],
   &[62, 127, 81, 85, 69, 127, 62],
   &[62, 127, 99, 85, 103, 127, 62],
   &[62, 127, 77, 117, 121, 127, 62],
@@ -262,24 +331,28 @@ static FONT_DATA : &[&[u8]] = &[
   &[62, 127, 81, 85, 97, 127, 62],
   &[62, 65, 127, 65, 93, 65, 62],
   &[62, 127, 127, 127, 127, 127, 62],
+  &[99, 65, 62, 34, 62, 65, 99],
   &[62, 127, 65, 93, 65, 127, 62],
 ];
 
-pub(crate) static CHAR_LIST : &[char] = &[
+pub(crate) static CHAR_LIST : [char; FONT_DATA_LEN] = [
   '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/', '0', '1', '2', '3',
   '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?', '@', 'A', 'B', 'C', 'D', 'E', 'F',
   'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
   'Z', '[', '\\', ']', '^', '_', '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
   'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~', '«',
-  'µ', '»', 'Λ', 'λ', 'ω', '▪', '➊', '➋', '➌', '➍', '➎', '➏', '➐', '➑', '➒', '➓', '⬤', '🄌',
+  'µ', '»', 'Λ', 'λ', 'ω', '▪', '➀', '➁', '➂', '➃', '➄', '➅', '➆', '➇', '➈', '➉', '➊', '➋', '➌',
+  '➍', '➎', '➏', '➐', '➑', '➒', '➓', '⬤', '🄋', '🄌',
 ];
 
 #[must_use]
 pub fn font_map(c : char) -> &'static [u8] {
   if c == ' ' {
-    &[0; 5]
+    &[0; 3]
+  } else if c == '\n' || c == DisplayStruct::CURSOR_END || c == DisplayStruct::CURSOR_START {
+    &[]
   } else if let Ok(pos) = CHAR_LIST.binary_search(&c) {
-    FONT_DATA[pos]
+    unsafe { FONT_DATA.get_unchecked(pos) }
   } else {
     &[85, 42, 85, 42, 85]
   }

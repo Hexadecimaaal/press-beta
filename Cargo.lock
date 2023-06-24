@@ -312,6 +312,7 @@ dependencies = [
  "embedded-hal",
  "embedded-time",
  "fugit",
+ "nb 1.1.0",
  "once_cell",
  "panic-probe",
  "rp-pico",
