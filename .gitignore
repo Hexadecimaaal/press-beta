@@ -2,3 +2,5 @@
 hardware/fp-info-cache
 hardware/press-beta-backups
 _autosave*
+hardware/*.zip
+hardware/*bak
