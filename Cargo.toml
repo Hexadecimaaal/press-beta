@@ -30,9 +30,10 @@ nb = "1.1.0"
 # name = "pico"
 # target = "thumbv6m-none-eabi"
 
-# [[bin]]
-# name = "press-beta"
-# target = "x86_64-linux-gnu"
+[[bin]]
+name = "press-beta"
+test = false
+bench = false
 
 [profile.dev]
 opt-level = 3

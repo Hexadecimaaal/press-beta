@@ -98,8 +98,8 @@ fn main() -> ! {
   // let mut rtt_input_buf = [0u8; 256];
   loop {
     let input =
-      // "^ 2 4 redux b dn dn dn dn dn dn dn rt rt rt rt rt rt up up rt up up rm";
-      "l l . 1 up up up";
+      "^ 2 4 redux b dn dn dn dn dn dn dn dn rt rt rt rt rt rt up up rt up up rm";
+      // "l l . 1 up up up";
     let mut cursor = Hole;
     let mut expr = Slot;
     let mut leaf_mode = LeafMode::No;
@@ -148,7 +148,7 @@ fn main() -> ! {
               leaf_mode = LeafMode::Leaf;
             }
           }
-          Slot => panic!(),
+          _ => panic!(),
         },
         "up" => {
           if leaf_mode == LeafMode::Leaf {
