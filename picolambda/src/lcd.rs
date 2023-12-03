@@ -5,31 +5,37 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::prelude::_embedded_hal_blocking_spi_Write;
 use embedded_hal::spi::FullDuplex;
 use fugit::RateExtU32;
+use hal::gpio::Function;
+use hal::gpio::FunctionNull;
+use hal::gpio::FunctionSio;
 use hal::gpio::Pin;
 use hal::gpio::PinId;
-use hal::gpio::PinMode;
 use hal::gpio::PinState;
-use hal::gpio::PushPullOutput;
-use hal::gpio::ValidPinMode;
+use hal::gpio::PullNone;
+use hal::gpio::PullType;
+use hal::gpio::SioOutput;
+use hal::gpio::ValidFunction;
 use hal::pac;
 use hal::spi::Disabled;
+use hal::spi::ValidSpiPinout;
 use hal::Spi;
 use nb::block;
 use rp_pico::hal;
 
 use crate::lambda::DisplayStruct;
 
-pub struct Lcd<P0, P1, P2, S0>
+pub struct Lcd<P0, P1, P2, S0, V>
 where
-  P0 : PinId,
-  P1 : PinId,
-  P2 : PinId,
+  P0 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
+  P1 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
+  P2 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
   S0 : hal::spi::SpiDevice,
+  V : hal::spi::ValidSpiPinout<S0>,
 {
-  lcd_reset : Pin<P0, PushPullOutput>,
-  chip_select : Pin<P1, PushPullOutput>,
-  register_select : Pin<P2, PushPullOutput>,
-  spi : hal::Spi<hal::spi::Enabled, S0, 8>,
+  lcd_reset : Pin<P0, FunctionSio<SioOutput>, PullNone>,
+  chip_select : Pin<P1, FunctionSio<SioOutput>, PullNone>,
+  register_select : Pin<P2, FunctionSio<SioOutput>, PullNone>,
+  spi : hal::Spi<hal::spi::Enabled, S0, V, 8>,
   current_page : u8,
   current_col : u8,
   inverted_mode : bool,
@@ -39,29 +45,36 @@ where
 const WIDTH : u8 = 128;
 const HEIGHT : u8 = 8; // 8 * 8 = 64
 
-impl<P0, P1, P2, S0> Lcd<P0, P1, P2, S0>
+impl<P0, P1, P2, S0, P> Lcd<P0, P1, P2, S0, P>
 where
-  P0 : PinId,
-  P1 : PinId,
-  P2 : PinId,
+  P0 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
+  P1 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
+  P2 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
   S0 : hal::spi::SpiDevice,
+  P : ValidSpiPinout<S0>,
 {
   pub fn new(
-    reset : Pin<P0, impl PinMode + ValidPinMode<P0>>,
-    cs : Pin<P1, impl PinMode + ValidPinMode<P1>>,
-    rs : Pin<P2, impl PinMode + ValidPinMode<P2>>,
-    spi : Spi<Disabled, S0, 8>,
+    reset : Pin<P0, impl Function, impl PullType>,
+    cs : Pin<P1, impl Function, impl PullType>,
+    rs : Pin<P2, impl Function, impl PullType>,
+    spi : Spi<Disabled, S0, P, 8>,
     resets : &mut pac::RESETS,
-  ) -> Lcd<P0, P1, P2, S0> {
+  ) -> Lcd<P0, P1, P2, S0, P> {
     Lcd {
-      lcd_reset : reset.into_push_pull_output_in_state(PinState::Low),
-      chip_select : cs.into_push_pull_output_in_state(PinState::High),
-      register_select : rs.into_push_pull_output_in_state(PinState::High),
+      lcd_reset : reset
+        .into_floating_disabled()
+        .into_push_pull_output_in_state(PinState::Low),
+      chip_select : cs
+        .into_floating_disabled()
+        .into_push_pull_output_in_state(PinState::High),
+      register_select : rs
+        .into_floating_disabled()
+        .into_push_pull_output_in_state(PinState::High),
       spi : spi.init(
         resets,
         125_000_000u32.Hz(),
         16_000_000u32.Hz(),
-        &embedded_hal::spi::MODE_3,
+        embedded_hal::spi::MODE_3,
       ),
       current_col : 0,
       current_page : 0,
@@ -183,12 +196,13 @@ where
   }
 }
 
-impl<P0, P1, P2, S0> fmt::Write for Lcd<P0, P1, P2, S0>
+impl<P0, P1, P2, S0, V> fmt::Write for Lcd<P0, P1, P2, S0, V>
 where
-  P0 : PinId,
-  P1 : PinId,
-  P2 : PinId,
+  P0 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
+  P1 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
+  P2 : PinId + ValidFunction<FunctionSio<SioOutput>> + ValidFunction<FunctionNull>,
   S0 : hal::spi::SpiDevice,
+  V : ValidSpiPinout<S0>,
 {
   fn write_str(&mut self, s : &str) -> fmt::Result {
     self.swrite(s);

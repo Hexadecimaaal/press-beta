@@ -31,6 +31,7 @@ use crate::lambda::Expr;
 use crate::lambda::Expr::*;
 use crate::lambda::LeafMode;
 use crate::lambda::{app, lam, PLUS, POWER, TIMES};
+use lambda_arena::*;
 
 #[entry]
 fn main() -> ! {
@@ -70,7 +71,7 @@ fn main() -> ! {
   .unwrap();
 
   let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-  let timer = hal::timer::Timer::new(pac.TIMER, &mut pac.RESETS);
+  let timer = hal::timer::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
   let pins = hal::gpio::Pins::new(
     pac.IO_BANK0,
@@ -81,15 +82,18 @@ fn main() -> ! {
 
   // let mut led_pin = pins.gpio25.into_push_pull_output();
 
-  let _ = pins.gpio2.into_mode::<FunctionSpi>();
-  let _ = pins.gpio3.into_mode::<FunctionSpi>();
-  let _ = pins.gpio4.into_mode::<FunctionSpi>();
+  // let _ = pins.gpio2.into_mode::<FunctionSpi>();
+  // let _ = pins.gpio3.into_mode::<FunctionSpi>();
+  // let _ = pins.gpio4.into_mode::<FunctionSpi>();
 
   let mut lcd = lcd::Lcd::new(
     pins.gpio0,
     pins.gpio5,
     pins.gpio1,
-    hal::spi::Spi::<_, _, 8>::new(pac.SPI0),
+    hal::spi::Spi::<_, _, _, 8>::new(
+      pac.SPI0,
+      (pins.gpio3.into_function(), pins.gpio2.into_function()),
+    ),
     &mut pac.RESETS,
   );
 
@@ -97,9 +101,8 @@ fn main() -> ! {
 
   // let mut rtt_input_buf = [0u8; 256];
   loop {
-    let input =
-      "^ 2 4 redux b dn dn dn dn dn dn dn dn rt rt rt rt rt rt up up rt up up rm";
-      // "l l . 1 up up up";
+    let input = "^ 2 4 redux b dn dn dn dn dn dn dn dn rt rt rt rt rt rt up up rt up up rm";
+    // "l l . 1 up up up";
     let mut cursor = Hole;
     let mut expr = Slot;
     let mut leaf_mode = LeafMode::No;

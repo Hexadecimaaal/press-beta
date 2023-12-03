@@ -1,0 +1,13 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "lambda_arena"
+version = "0.0.0"
+edition = "2021"
+
+[features]
+default = ["std"]
+std = []
+
+[lib]
+path = "lib.rs"

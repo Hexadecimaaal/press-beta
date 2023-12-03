@@ -1,17 +1,21 @@
+cargo-features = ["per-package-target"]
+
 [package]
-name = "press-beta"
+name = "picolambda"
 version = "0.0.0"
 edition = "2021"
+forced-target = "thumbv6m-none-eabi"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+lambda_arena = { path = "../lambda-arena", default-features = false }
 once_cell = { version = "1.17.2", default-features = false, features = [
   "critical-section",
 ] }
-rp2040-hal = "0.8.2"
+rp2040-hal = "0.9.0"
 rp2040-boot2 = "0.3.0"
-rp-pico = "0.7.0"
+rp-pico = "0.8.0"
 alloc-cortex-m = "0.4.4"
 critical-section = "1.1.1"
 cortex-m = { version = "0.7.7", features = ["critical-section"] }
@@ -32,12 +36,13 @@ nb = "1.1.0"
 
 [[bin]]
 name = "press-beta"
+path = "src/main.rs"
 test = false
 bench = false
 
-[profile.dev]
-opt-level = 3
-lto = true
+# [profile.dev]
+# opt-level = 3
+# lto = true
 
-[profile.dev.package."*"] # +
-opt-level = 3 # +
+# [profile.dev.package."*"] # +
+# opt-level = 3 # +
