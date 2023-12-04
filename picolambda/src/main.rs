@@ -11,6 +11,15 @@ use alloc_cortex_m::CortexMHeap;
 use core::fmt::Write;
 use core::mem;
 use cortex_m::asm::wfi;
+use embedded_graphics::geometry::Dimensions;
+use embedded_graphics::geometry::Point;
+use embedded_graphics::geometry::Size;
+use embedded_graphics::pixelcolor::BinaryColor;
+use embedded_graphics::primitives::Ellipse;
+use embedded_graphics::primitives::Primitive;
+use embedded_graphics::primitives::PrimitiveStyle;
+use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::Drawable;
 #[global_allocator]
 static ALLOCATOR : CortexMHeap = CortexMHeap::empty();
 
@@ -98,254 +107,276 @@ fn main() -> ! {
   );
 
   lcd.lcd_init(&mut delay);
+  loop {
+    let time = timer.get_counter();
+    let bbox = lcd.bounding_box();
+    bbox
+      .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
+      .draw(&mut lcd)
+      .unwrap();
+    Ellipse::new(bbox.top_left, bbox.size)
+      .into_styled(PrimitiveStyle::with_stroke(BinaryColor::Off, 1))
+      .draw(&mut lcd)
+      .unwrap();
+    Rectangle::new(Point::new(10, 10), Size::new(20, 20))
+      .into_styled(PrimitiveStyle::with_fill(BinaryColor::Off))
+      .draw(&mut lcd)
+      .unwrap();
+    rprintln!("elapsed = {}", timer.get_counter() - time);
+    // rprintln!("{:?}", lcd.framebuffer[0]);
+    let time = timer.get_counter();
+    lcd.flush();
+    rprintln!("elapsed = {}", timer.get_counter() - time);
+    wfi();
+  }
 
   // let mut rtt_input_buf = [0u8; 256];
-  loop {
-    let input = "^ 2 4 redux b dn dn dn dn dn dn dn dn rt rt rt rt rt rt up up rt up up rm";
-    // "l l . 1 up up up";
-    let mut cursor = Hole;
-    let mut expr = Slot;
-    let mut leaf_mode = LeafMode::No;
-    for cmd in input.split_whitespace() {
-      let start = timer.get_counter_low();
-      lcd.clear();
-      lcd.locate(0, 0);
-      writeln!(lcd, "cmd={cmd}").unwrap();
-      match cmd {
-        "bs" => cursor = Hole,
-        "l" => {
-          if cursor == Hole {
-            expr.replace_slot(lam(Slot));
-          } else {
-            cursor = lam(cursor);
-          }
-        }
-        "b" => {
-          if !cursor.beta() {
-            rprintln!("boop(beta)");
-          }
-        }
-        "redux" => {
-          if let Some(hd) = cursor.find_redux() {
-            let mut new = Slot;
-            mem::swap(hd, &mut new);
-            expr.replace_slot(cursor);
-            cursor = new;
-          } else {
-            rprintln!("boop(redux)");
-          }
-        }
-        "dn" => match cursor {
-          Lam(e) => {
-            expr.replace_slot(lam(Slot));
-            cursor = *e;
-          }
-          App(l, r) => {
-            expr.replace_slot(app(Slot, *r));
-            cursor = *l;
-          }
-          Hole | Var(_) => {
-            if leaf_mode == LeafMode::Leaf {
-              rprintln!("boop");
-            } else {
-              leaf_mode = LeafMode::Leaf;
-            }
-          }
-          _ => panic!(),
-        },
-        "up" => {
-          if leaf_mode == LeafMode::Leaf {
-            leaf_mode = LeafMode::No;
-          } else if let Some(p) = expr.find_slot_parent() {
-            if let App(box Slot, box e) | App(box e, box Slot) = p
-            && cursor == Hole {
-              mem::swap(e, &mut cursor);
-              *p = Slot;
-            } else {
-              let mut new = Slot;
-              mem::swap(p, &mut new);
-              new.replace_slot(cursor);
-              cursor = new;
-            }
-          } else {
-            rprintln!("boop");
-          }
-        }
-        "top" => {
-          expr.replace_slot(cursor);
-          cursor = expr;
-          expr = Slot;
-        }
-        "lm" => {
-          let mut new = Slot;
-          mem::swap(cursor.leftmost(), &mut new);
-          expr.replace_slot(cursor);
-          cursor = new;
-          leaf_mode = LeafMode::Leaf;
-        }
-        "rm" => {
-          let mut new = Slot;
-          mem::swap(cursor.rightmost(), &mut new);
-          expr.replace_slot(cursor);
-          cursor = new;
-          leaf_mode = LeafMode::Leaf;
-        }
-        "lt" => {
-          if leaf_mode == LeafMode::Leaf {
-            if let Some((slot, sib)) = expr.find_slot_leftsib() {
-              mem::swap(slot, &mut cursor);
-              mem::swap(sib, &mut cursor);
-            } else {
-              leaf_mode = LeafMode::No;
-            }
-          } else if let Some(p) = expr.find_slot_parent() {
-            match p {
-              App(box e, box Slot) if cursor == Hole => {
-                mem::swap(e, &mut cursor);
-                *p = Slot;
-              }
-              App(box l, box r) if *r == Slot => {
-                mem::swap(r, &mut cursor);
-                mem::swap(l, &mut cursor);
-              }
-              _ => {
-                let mut new = Slot;
-                mem::swap(p, &mut new);
-                new.replace_slot(cursor);
-                cursor = new;
-              }
-            }
-          } else {
-            rprintln!("boop");
-          }
-        }
-        "rt" => {
-          if leaf_mode == LeafMode::Leaf {
-            if let Some((slot, sib)) = expr.find_slot_rightsib() {
-              mem::swap(slot, &mut cursor);
-              mem::swap(sib, &mut cursor);
-            } else {
-              leaf_mode = LeafMode::No;
-            }
-          } else if let Some(p) = expr.find_slot_parent() {
-            match p {
-              App(box Slot, box e) if cursor == Hole => {
-                mem::swap(e, &mut cursor);
-                *p = Slot;
-              }
-              App(l, r) if **l == Slot => {
-                mem::swap::<Expr>(l, &mut cursor);
-                mem::swap::<Expr>(r, &mut cursor);
-              }
-              _ => {
-                let mut new = Slot;
-                mem::swap(p, &mut new);
-                new.replace_slot(cursor);
-                cursor = new;
-              }
-            }
-          } else {
-            rprintln!("boop");
-          }
-        }
-        "$" => {
-          expr.replace_slot(app(cursor, Slot));
-          cursor = Hole;
-        }
-        "@" => {
-          expr.replace_slot(app(Slot, cursor));
-          cursor = Hole;
-        }
-        "+" => match cursor {
-          Hole => cursor = PLUS.clone(),
-          _ => cursor = app(PLUS.clone(), cursor),
-        },
-        "*" => match cursor {
-          Hole => cursor = TIMES.clone(),
-          _ => cursor = app(TIMES.clone(), cursor),
-        },
-        "^" => match cursor {
-          Hole => cursor = POWER.clone(),
-          _ => cursor = app(POWER.clone(), cursor),
-        },
-        "." => {
-          if cursor == Hole {
-            leaf_mode = LeafMode::InputDot;
-          } else {
-            cursor = app(cursor, Slot);
-            expr.replace_slot(cursor);
-            cursor = Hole;
-            leaf_mode = LeafMode::InputDot;
-          }
-        }
-        s => {
-          if let Ok(u) = s.parse() {
-            if cursor == Hole {
-              if leaf_mode == LeafMode::InputDot {
-                cursor = Var(u);
-                leaf_mode = LeafMode::Leaf;
-              } else {
-                cursor = Expr::from_nat(u);
-              }
-            } else {
-              cursor = app(cursor, Expr::from_nat(u));
-            }
-          } else if let Some(u) = s
-            .strip_prefix('[')
-            .and_then(|s| s.strip_suffix(']'))
-            .and_then(|s| s.parse().ok())
-          {
-            if cursor == Hole {
-              cursor = Var(u);
-            } else {
-              cursor = app(cursor, Var(u));
-            }
-          } else {
-            rprintln!("unrec'd cmd: {s}");
-          }
-        }
-      }
-      // for c in lcd::CHAR_LIST {
-      //   lcd.write_or_wrap(lcd::font_map(*c), false);
-      //   lcd.data_write(&[0]);
-      // }
-      // lcd.wrap();
-      // let mut pow24 = app(
-      //   app(
-      //     lambda::POWER.clone(),
-      //     app(
-      //       app(lambda::PLUS.clone(), Expr::from_nat(1)),
-      //       Expr::from_nat(1),
-      //     ),
-      //   ),
-      //   Expr::from_nat(6),
-      // );
-      // let mut max_use = 0;
-      // while let Some(r) = pow24.find_redux() {
-      //   max_use = usize::max(max_use, ALLOCATOR.used());
-      //   r.beta();
-      //   writeln!(lcd, "=> {pow24}").unwrap();
-      // }
-      lcd.data_write(&[0]);
-      writeln!(
-        lcd,
-        "{}",
-        lambda::DisplayStruct {
-          expr : &expr,
-          cursor : &cursor,
-          leaf_mode
-        }
-      )
-      .unwrap();
-      writeln!(lcd, "free={}", ALLOCATOR.free()).unwrap();
-      writeln!(lcd, "used={}", ALLOCATOR.used()).unwrap();
-      writeln!(lcd, "time={}", (timer.get_counter_low() - start)).unwrap();
-      // rprintln!("on!");
-      // led_pin.set_high().unwrap();
-      // delay.delay_ms(500);
-      // rprintln!("off!");
-      // led_pin.set_low().unwrap();
-      delay.delay_ms(1000);
-    }
-  }
+  // loop {
+  //   let input = "^ 2 4 redux b dn dn dn dn dn dn dn dn rt rt rt rt rt rt up
+  // up rt up up rm";   // "l l . 1 up up up";
+  //   let mut cursor = Hole;
+  //   let mut expr = Slot;
+  //   let mut leaf_mode = LeafMode::No;
+  //   for cmd in input.split_whitespace() {
+  //     let start = timer.get_counter_low();
+  //     lcd.clear();
+  //     lcd.locate(0, 0);
+  //     writeln!(lcd, "cmd={cmd}").unwrap();
+  //     match cmd {
+  //       "bs" => cursor = Hole,
+  //       "l" => {
+  //         if cursor == Hole {
+  //           expr.replace_slot(lam(Slot));
+  //         } else {
+  //           cursor = lam(cursor);
+  //         }
+  //       }
+  //       "b" => {
+  //         if !cursor.beta() {
+  //           rprintln!("boop(beta)");
+  //         }
+  //       }
+  //       "redux" => {
+  //         if let Some(hd) = cursor.find_redux() {
+  //           let mut new = Slot;
+  //           mem::swap(hd, &mut new);
+  //           expr.replace_slot(cursor);
+  //           cursor = new;
+  //         } else {
+  //           rprintln!("boop(redux)");
+  //         }
+  //       }
+  //       "dn" => match cursor {
+  //         Lam(e) => {
+  //           expr.replace_slot(lam(Slot));
+  //           cursor = *e;
+  //         }
+  //         App(l, r) => {
+  //           expr.replace_slot(app(Slot, *r));
+  //           cursor = *l;
+  //         }
+  //         Hole | Var(_) => {
+  //           if leaf_mode == LeafMode::Leaf {
+  //             rprintln!("boop");
+  //           } else {
+  //             leaf_mode = LeafMode::Leaf;
+  //           }
+  //         }
+  //         _ => panic!(),
+  //       },
+  //       "up" => {
+  //         if leaf_mode == LeafMode::Leaf {
+  //           leaf_mode = LeafMode::No;
+  //         } else if let Some(p) = expr.find_slot_parent() {
+  //           if let App(box Slot, box e) | App(box e, box Slot) = p
+  //           && cursor == Hole {
+  //             mem::swap(e, &mut cursor);
+  //             *p = Slot;
+  //           } else {
+  //             let mut new = Slot;
+  //             mem::swap(p, &mut new);
+  //             new.replace_slot(cursor);
+  //             cursor = new;
+  //           }
+  //         } else {
+  //           rprintln!("boop");
+  //         }
+  //       }
+  //       "top" => {
+  //         expr.replace_slot(cursor);
+  //         cursor = expr;
+  //         expr = Slot;
+  //       }
+  //       "lm" => {
+  //         let mut new = Slot;
+  //         mem::swap(cursor.leftmost(), &mut new);
+  //         expr.replace_slot(cursor);
+  //         cursor = new;
+  //         leaf_mode = LeafMode::Leaf;
+  //       }
+  //       "rm" => {
+  //         let mut new = Slot;
+  //         mem::swap(cursor.rightmost(), &mut new);
+  //         expr.replace_slot(cursor);
+  //         cursor = new;
+  //         leaf_mode = LeafMode::Leaf;
+  //       }
+  //       "lt" => {
+  //         if leaf_mode == LeafMode::Leaf {
+  //           if let Some((slot, sib)) = expr.find_slot_leftsib() {
+  //             mem::swap(slot, &mut cursor);
+  //             mem::swap(sib, &mut cursor);
+  //           } else {
+  //             leaf_mode = LeafMode::No;
+  //           }
+  //         } else if let Some(p) = expr.find_slot_parent() {
+  //           match p {
+  //             App(box e, box Slot) if cursor == Hole => {
+  //               mem::swap(e, &mut cursor);
+  //               *p = Slot;
+  //             }
+  //             App(box l, box r) if *r == Slot => {
+  //               mem::swap(r, &mut cursor);
+  //               mem::swap(l, &mut cursor);
+  //             }
+  //             _ => {
+  //               let mut new = Slot;
+  //               mem::swap(p, &mut new);
+  //               new.replace_slot(cursor);
+  //               cursor = new;
+  //             }
+  //           }
+  //         } else {
+  //           rprintln!("boop");
+  //         }
+  //       }
+  //       "rt" => {
+  //         if leaf_mode == LeafMode::Leaf {
+  //           if let Some((slot, sib)) = expr.find_slot_rightsib() {
+  //             mem::swap(slot, &mut cursor);
+  //             mem::swap(sib, &mut cursor);
+  //           } else {
+  //             leaf_mode = LeafMode::No;
+  //           }
+  //         } else if let Some(p) = expr.find_slot_parent() {
+  //           match p {
+  //             App(box Slot, box e) if cursor == Hole => {
+  //               mem::swap(e, &mut cursor);
+  //               *p = Slot;
+  //             }
+  //             App(l, r) if **l == Slot => {
+  //               mem::swap::<Expr>(l, &mut cursor);
+  //               mem::swap::<Expr>(r, &mut cursor);
+  //             }
+  //             _ => {
+  //               let mut new = Slot;
+  //               mem::swap(p, &mut new);
+  //               new.replace_slot(cursor);
+  //               cursor = new;
+  //             }
+  //           }
+  //         } else {
+  //           rprintln!("boop");
+  //         }
+  //       }
+  //       "$" => {
+  //         expr.replace_slot(app(cursor, Slot));
+  //         cursor = Hole;
+  //       }
+  //       "@" => {
+  //         expr.replace_slot(app(Slot, cursor));
+  //         cursor = Hole;
+  //       }
+  //       "+" => match cursor {
+  //         Hole => cursor = PLUS.clone(),
+  //         _ => cursor = app(PLUS.clone(), cursor),
+  //       },
+  //       "*" => match cursor {
+  //         Hole => cursor = TIMES.clone(),
+  //         _ => cursor = app(TIMES.clone(), cursor),
+  //       },
+  //       "^" => match cursor {
+  //         Hole => cursor = POWER.clone(),
+  //         _ => cursor = app(POWER.clone(), cursor),
+  //       },
+  //       "." => {
+  //         if cursor == Hole {
+  //           leaf_mode = LeafMode::InputDot;
+  //         } else {
+  //           cursor = app(cursor, Slot);
+  //           expr.replace_slot(cursor);
+  //           cursor = Hole;
+  //           leaf_mode = LeafMode::InputDot;
+  //         }
+  //       }
+  //       s => {
+  //         if let Ok(u) = s.parse() {
+  //           if cursor == Hole {
+  //             if leaf_mode == LeafMode::InputDot {
+  //               cursor = Var(u);
+  //               leaf_mode = LeafMode::Leaf;
+  //             } else {
+  //               cursor = Expr::from_nat(u);
+  //             }
+  //           } else {
+  //             cursor = app(cursor, Expr::from_nat(u));
+  //           }
+  //         } else if let Some(u) = s
+  //           .strip_prefix('[')
+  //           .and_then(|s| s.strip_suffix(']'))
+  //           .and_then(|s| s.parse().ok())
+  //         {
+  //           if cursor == Hole {
+  //             cursor = Var(u);
+  //           } else {
+  //             cursor = app(cursor, Var(u));
+  //           }
+  //         } else {
+  //           rprintln!("unrec'd cmd: {s}");
+  //         }
+  //       }
+  //     }
+  // for c in lcd::CHAR_LIST {
+  //   lcd.write_or_wrap(lcd::font_map(*c), false);
+  //   lcd.data_write(&[0]);
+  // }
+  // lcd.wrap();
+  // let mut pow24 = app(
+  //   app(
+  //     lambda::POWER.clone(),
+  //     app(
+  //       app(lambda::PLUS.clone(), Expr::from_nat(1)),
+  //       Expr::from_nat(1),
+  //     ),
+  //   ),
+  //   Expr::from_nat(6),
+  // );
+  // let mut max_use = 0;
+  // while let Some(r) = pow24.find_redux() {
+  //   max_use = usize::max(max_use, ALLOCATOR.used());
+  //   r.beta();
+  //   writeln!(lcd, "=> {pow24}").unwrap();
+  // }
+  //   lcd.data_write(&[0]);
+  //   writeln!(
+  //     lcd,
+  //     "{}",
+  //     lambda::DisplayStruct {
+  //       expr : &expr,
+  //       cursor : &cursor,
+  //       leaf_mode
+  //     }
+  //   )
+  //   .unwrap();
+  //   writeln!(lcd, "free={}", ALLOCATOR.free()).unwrap();
+  //   writeln!(lcd, "used={}", ALLOCATOR.used()).unwrap();
+  //   writeln!(lcd, "time={}", (timer.get_counter_low() - start)).unwrap();
+  //   // rprintln!("on!");
+  //   // led_pin.set_high().unwrap();
+  //   // delay.delay_ms(500);
+  //   // rprintln!("off!");
+  //   // led_pin.set_low().unwrap();
+  //   delay.delay_ms(1000);
+  // }
+  // }
 }

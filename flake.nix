@@ -49,6 +49,7 @@
             flip-link
             probe-run
             probe-rs-cli
+            elf2uf2-rs
           ];
         };
         packages.default = (makeRustPlatform {
