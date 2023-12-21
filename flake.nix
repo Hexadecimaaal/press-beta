@@ -28,6 +28,7 @@
           buildInputs = [
             rust
             cargo-binutils
+            cargo-show-asm
             (openocd.overrideAttrs (old: {
               src = fetchFromGitHub {
                 owner = "raspberrypi";
